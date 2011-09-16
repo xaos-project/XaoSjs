@@ -27,32 +27,34 @@
  */
 var xaos = xaos || {};
 
+Function.prototype.curry = function () {
+    var slice = Array.prototype.slice,
+        args = slice.apply(arguments),
+        that = this;
+    return function () {
+        return that.apply(null, args.concat(slice.apply(arguments)));
+    };
+};
 xaos.zoom = function(canvas, fractal) {
-    var MODE_CALCULATE = 0x01;
-    var MODE_REFRESH = 0x02;
-    var USE_XAOS = true;
-    var USE_SYMMETRY = false;
-    var RANGES = 2;
-    var RANGE = 4;
-    var STEPS = 8;
-    var MASK = 0x7;
-    var DSIZE = (RANGES + 1);
-    var FPMUL = 64;
-    var FPRANGE = FPMUL * RANGE;
-    var MAX_PRICE = Number.MAX_VALUE;
-    var NEW_PRICE = FPRANGE * FPRANGE;
-    var multable = (function() {
-        var multable = [], i;
-        for (i = -FPRANGE; i < FPRANGE; i++) {
-            multable[FPRANGE + i] = i * i;
-        }
-        return multable;
-    }());
-    var mouse = { x: 0, y: 0, button: [false, false, false] }
-    var renderPoint = fractal.formula;
-    var context = canvas.getContext("2d");
-    var bufferWidth = canvas.width * 4;
-    var renderMode = 0;
+    "use strict";
+    var MODE_CALCULATE = 0x01,
+        MODE_REFRESH = 0x02,
+        USE_XAOS = true,
+        USE_SYMMETRY = false,
+        RANGES = 2,
+        RANGE = 4,
+        STEPS = 8,
+        MASK = 0x7,
+        DSIZE = (RANGES + 1),
+        FPMUL = 64,
+        FPRANGE = FPMUL * RANGE,
+        MAX_PRICE = Number.MAX_VALUE,
+        NEW_PRICE = FPRANGE * FPRANGE,
+        mouse = { x: 0, y: 0, button: [false, false, false] },
+        renderPoint = fractal.formula.curry(fractal.palette),
+        context = canvas.getContext("2d"),
+        bufferWidth = canvas.width * 4,
+        renderMode = 0;
     var renderedData = (function() {
         var initArray = function(size, initial) {
             var data = [], i;
@@ -525,9 +527,8 @@ xaos.zoom = function(canvas, fractal) {
         };
 
         var arrayCopy = function(from, fromOffset, to, toOffset, length) {
-            var i;
-            for (i = 0; i < length; i++) {
-                to[toOffset+i] = from[fromOffset+i];
+            while (length--) {
+                to[toOffset++] = from[fromOffset++];
             }
         };
 
@@ -552,9 +553,9 @@ xaos.zoom = function(canvas, fractal) {
                     from_offset = reallocX[i].symTo;
                     for (j = 0; j < reallocY.length; j++) {
                         newRGB[to_offset  ] = newRGB[from_offset];
-                        newRGB[to_offset+1] = newRGB[from_offset+1];
-                        newRGB[to_offset+2] = newRGB[from_offset+2];
-                        newRGB[to_offset+3] = newRGB[from_offset+3];
+                        newRGB[to_offset + 1] = newRGB[from_offset + 1];
+                        newRGB[to_offset + 2] = newRGB[from_offset + 2];
+                        newRGB[to_offset + 3] = newRGB[from_offset + 3];
                         to_offset += bufferWidth;
                         from_offset += bufferWidth;
                     }
@@ -770,14 +771,14 @@ xaos.zoom = function(canvas, fractal) {
                         if (!reallocY[j].dirty) {
                             s = 0;
                             while ((tmpData = filltable[s]).length > 0) {
-                                from = from_offset + tmpData.from*4;
-                                to = from_offset + tmpData.to*4;
+                                from = from_offset + tmpData.from * 4;
+                                to = from_offset + tmpData.to * 4;
                                 for (t = 0; t < tmpData.length; t++) {
-                                    d = to + t*4;
+                                    d = to + t * 4;
                                     newRGB[d  ] = newRGB[from  ];
-                                    newRGB[d+1] = newRGB[from+1];
-                                    newRGB[d+2] = newRGB[from+2];
-                                    newRGB[d+3] = newRGB[from+3];
+                                    newRGB[d + 1] = newRGB[from + 1];
+                                    newRGB[d + 2] = newRGB[from + 2];
+                                    newRGB[d + 3] = newRGB[from + 3];
                                 }
                                 s += 1;
                             }
@@ -792,14 +793,14 @@ xaos.zoom = function(canvas, fractal) {
                     s = 0;
                     from_offset = i * bufferWidth;
                     while ((tmpData = filltable[s]).length > 0) {
-                        from = from_offset + tmpData.from*4;
-                        to = from_offset + tmpData.to*4;
+                        from = from_offset + tmpData.from * 4;
+                        to = from_offset + tmpData.to * 4;
                         for (t = 0; t < tmpData.length; t++) {
-                            d = to + t*4;
+                            d = to + t * 4;
                             newRGB[d  ] = newRGB[from  ];
-                            newRGB[d+1] = newRGB[from+1];
-                            newRGB[d+2] = newRGB[from+2];
-                            newRGB[d+3] = newRGB[from+3];
+                            newRGB[d + 1] = newRGB[from + 1];
+                            newRGB[d + 2] = newRGB[from + 2];
+                            newRGB[d + 3] = newRGB[from + 3];
                         }
                         s += 1;
                     }
@@ -822,7 +823,7 @@ xaos.zoom = function(canvas, fractal) {
         };
 
         var calcPrice = function(p1, p2) {
-            return multable[(FPRANGE + p1) - p2];
+            return (p1 - p2) * (p1 - p2);
         };
 
         var addPrices = function(realloc, r1, r2) {
@@ -891,19 +892,19 @@ xaos.zoom = function(canvas, fractal) {
             var offset = r * bufferWidth;
             var k;
             var len;
-            var rgba;
+            var rgb;
             var x0 = renderedData.x0;
             var y0 = renderedData.y0;
             var current;
             var newRGB = renderedData.newBuffer.data;
-            for (k = 0, len = reallocX.length; k < len; k++) {
+            for (k = 0,len = reallocX.length; k < len; k++) {
                 current = reallocX[k];
                 if (!current.dirty) {
-                    rgba = renderPoint(x0, y0, current.position, position);
-                    newRGB[offset  ] = rgba.r;
-                    newRGB[offset+1] = rgba.g;
-                    newRGB[offset+2] = rgba.b;
-                    newRGB[offset+3] = rgba.a;
+                    rgb = renderPoint(x0, y0, current.position, position);
+                    newRGB[offset] = rgb[0];
+                    newRGB[offset + 1] = rgb[1];
+                    newRGB[offset + 2] = rgb[2];
+                    newRGB[offset + 3] = 0xff;
                 }
                 offset += 4;
             }
@@ -914,22 +915,22 @@ xaos.zoom = function(canvas, fractal) {
 
         var renderColumn = function(realloc, reallocY) {
             var position = realloc.position;
-            var offset = realloc.pos*4;
+            var offset = realloc.pos * 4;
             var current;
             var x0 = renderedData.x0;
             var y0 = renderedData.y0;
             var k;
             var newRGB = renderedData.newBuffer.data;
-            var rgba;
+            var rgb;
             var len;
-            for (k = 0, len = reallocY.length; k < len; k++) {
+            for (k = 0,len = reallocY.length; k < len; k++) {
                 current = reallocY[k];
                 if (!current.dirty) {
-                    rgba = renderPoint(x0, y0, position, current.position);
-                    newRGB[offset  ] = rgba.r;
-                    newRGB[offset+1] = rgba.g;
-                    newRGB[offset+2] = rgba.b;
-                    newRGB[offset+3] = rgba.a;
+                    rgb = renderPoint(x0, y0, position, current.position);
+                    newRGB[offset] = rgb[0];
+                    newRGB[offset + 1] = rgb[1];
+                    newRGB[offset + 2] = rgb[2];
+                    newRGB[offset + 3] = 0xff;
                 }
                 offset += bufferWidth;
             }
@@ -990,13 +991,13 @@ xaos.zoom = function(canvas, fractal) {
                 tocalcx = 0;
                 tocalcy = 0;
                 tmpRealloc = renderedData.reallocX;
-                for (i = 0, len = tmpRealloc.length; i < len; i++) {
+                for (i = 0,len = tmpRealloc.length; i < len; i++) {
                     if (tmpRealloc[i].recalculate) {
                         tocalcx++;
                     }
                 }
                 tmpRealloc = renderedData.reallocY;
-                for (i = 0, len = tmpRealloc.length; i < len; i++) {
+                for (i = 0,len = tmpRealloc.length; i < len; i++) {
                     if (tmpRealloc[i].recalculate) {
                         tocalcy++;
                     }
@@ -1020,7 +1021,7 @@ xaos.zoom = function(canvas, fractal) {
                 renderedData.oldTime = renderedData.newTime = new Date().getTime();
                 for (s = 0; !isAborted && (s < STEPS); s++) {
                     tmpRealloc = renderedData.reallocY;
-                    for (i = offset[s], len = tmpRealloc.length; !isAborted && (i < len); i += STEPS) {
+                    for (i = offset[s],len = tmpRealloc.length; !isAborted && (i < len); i += STEPS) {
                         if (tmpRealloc[i].recalculate) {
                             renderLine(tmpRealloc[i], renderedData.reallocX);
                             tocalcy -= 1;
@@ -1033,7 +1034,7 @@ xaos.zoom = function(canvas, fractal) {
 
                     }
                     tmpRealloc = renderedData.reallocX;
-                    for (i = offset[s], len = tmpRealloc.length; !isAborted && (i < len); i += STEPS) {
+                    for (i = offset[s],len = tmpRealloc.length; !isAborted && (i < len); i += STEPS) {
                         if (tmpRealloc[i].recalculate) {
                             renderColumn(tmpRealloc[i], renderedData.reallocY);
                             tocalcx -= 1;
@@ -1047,12 +1048,12 @@ xaos.zoom = function(canvas, fractal) {
                     renderedData.newTime = new Date().getTime();
                     if (!isAborted && ((renderedData.newTime - renderedData.oldTime) > 50) && (s < STEPS)) {
                         tmpRealloc = renderedData.reallocY;
-                        for (i = 0, len = tmpRealloc.length; i < len; i++) {
+                        for (i = 0,len = tmpRealloc.length; i < len; i++) {
                             tmpRealloc[i].changeDirty = tmpRealloc[i].dirty;
                             tmpRealloc[i].changePosition = tmpRealloc[i].position;
                         }
                         tmpRealloc = renderedData.reallocX;
-                        for (i = 0, len = tmpRealloc.length; i < len; i++) {
+                        for (i = 0,len = tmpRealloc.length; i < len; i++) {
                             tmpRealloc[i].changeDirty = tmpRealloc[i].dirty;
                             tmpRealloc[i].changePosition = tmpRealloc[i].position;
                         }
@@ -1061,12 +1062,12 @@ xaos.zoom = function(canvas, fractal) {
                         copy();
                         //TODO: Thread.yield();
                         tmpRealloc = renderedData.reallocY;
-                        for (i = 0, len = tmpRealloc.length; i < len; i++) {
+                        for (i = 0,len = tmpRealloc.length; i < len; i++) {
                             tmpRealloc[i].dirty = tmpRealloc[i].changeDirty;
                             tmpRealloc[i].position = tmpRealloc[i].changePosition;
                         }
                         tmpRealloc = renderedData.reallocX;
-                        for (i = 0, len = tmpRealloc.length; i < len; i++) {
+                        for (i = 0,len = tmpRealloc.length; i < len; i++) {
                             tmpRealloc[i].dirty = tmpRealloc[i].changeDirty;
                             tmpRealloc[i].position = tmpRealloc[i].changePosition;
                         }
@@ -1091,10 +1092,10 @@ xaos.zoom = function(canvas, fractal) {
         var updatePosition = function() {
             var k;
             var len;
-            for (k = 0, len = renderedData.reallocX.length; k < len; k++) {
+            for (k = 0,len = renderedData.reallocX.length; k < len; k++) {
                 renderedData.positionX[k] = renderedData.reallocX[k].position;
             }
-            for (k = 0, len = renderedData.reallocY.length; k < len; k++) {
+            for (k = 0,len = renderedData.reallocY.length; k < len; k++) {
                 renderedData.positionY[k] = renderedData.reallocY[k].position;
             }
         };
@@ -1147,7 +1148,7 @@ xaos.zoom = function(canvas, fractal) {
     };
 
     var updateRegion = function() {
-        var MAXSTEP = 0.008*3;
+        var MAXSTEP = 0.008 * 3;
         //var STEP = 0.0006*3;
         var MUL = 0.3;
         var area = convertArea();
@@ -1157,22 +1158,22 @@ xaos.zoom = function(canvas, fractal) {
         var mmul;
         if (mouse.button[1] || (mouse.button[0] && mouse.button[2])) {
             // Pan when middle or left+right buttons are pressed
-	    step = 0;
+            step = 0;
         } else if (mouse.button[0]) {
             // Zoom in when left button is pressed
-            step = MAXSTEP*2;
+            step = MAXSTEP * 2;
         } else if (mouse.button[2]) {
             // Zoom out when right button is pressed
-            step = -MAXSTEP*2;
+            step = -MAXSTEP * 2;
         } else {
             return false;
         }
-        mmul = Math.pow((1-step), MUL);
+        mmul = Math.pow((1 - step), MUL);
         area.begin.x = x + (area.begin.x - x) * mmul;
         area.end.x = x + (area.end.x - x) * mmul;
         area.begin.y = y + (area.begin.y - y) * mmul;
         area.end.y = y + (area.end.y - y) * mmul;
-        fractal.region.radius.x  = area.end.x - area.begin.x;
+        fractal.region.radius.x = area.end.x - area.begin.x;
         fractal.region.radius.y = area.end.y - area.begin.y;
         fractal.region.center.x = (area.begin.x + area.end.x) / 2;
         fractal.region.center.y = ((area.begin.y + area.end.y) / 2) * (canvas.width / canvas.height);
@@ -1201,14 +1202,164 @@ xaos.zoom = function(canvas, fractal) {
     };
 
     canvas.oncontextmenu = function(e) {
-	    return false;
+        return false;
     };
 
     canvas.onmouseout = function(e) {
-	mouse.button = [false, false, false];
+        mouse.button = [false, false, false];
     };
 
     drawFractal(false);
+};
+
+xaos.makePalette = function(algorithm, seed) {
+    var MAXENTRIES = 65536,
+        MAXNSEGMENTS = 4096,
+        QQ = 255,
+        segmentsize,
+        setsegments,
+        nsegments,
+        whitemode,
+        i, y,
+        r, g, b,
+        rs, gs, bs,
+        segments,
+        palette = [];
+
+    var random = (function () {
+        var state = seed || 0;
+
+        var random = function (i) {
+            var MAXRAND = 0xffffff,
+                MAGICMUL = 1103515245,
+                MAGICADD = 12345;
+
+            state = (state * MAGICMUL + MAGICADD) & MAXRAND;
+            return i ? Math.floor(state / MAXRAND) * i : state;
+        };
+        random.reseed = function() {
+            state = seed;
+        };
+        return random;
+    }());
+
+    var segmentAlgorithms = [
+        function () {
+            var i = 0;
+
+            segments = [];
+            if (whitemode) {
+                segments.push([255, 255, 255]);
+                for (i = 0; i < nsegments; i += 2) {
+                    if (i != 0) {
+                        segments.push([random() % 256, random() % 256, random() % 256]);
+                    }
+                    if (i + 1 < nsegments) {
+                        segments.push([random() % 35, random() % 35, random() % 35]);
+                    }
+                }
+            } else {
+                for (i = 0; i < nsegments; i += 2) {
+                    segments.push([random() % 35, random() % 35, random() % 35]);
+                    if (i + 1 < nsegments) {
+                        segments.push([random() % 256, random() % 256, random() % 256]);
+                    }
+                }
+            }
+            segments.push(segments[0]);
+        },
+
+        function () {
+
+        },
+
+        function () {
+
+        }
+    ];
+
+    if (algorithm !== undefined && segmentAlgorithms[algorithm]) {
+        seed = random();
+        whitemode = random() % 2;
+        // Make smaller segments with higher probability
+        segmentsize = random(QQ / 3 + 4);
+        segmentsize += random(QQ / 3 + 4);
+        segmentsize += random(QQ / 3 + 4);
+        segmentsize += random(QQ / 3 + 4);
+        segmentsize = Math.abs(segmentsize / 2 - QQ / 3 + 3);
+        if (segmentsize < 8) {
+            segmentsize = 8;
+        } else if (segmentsize > MAXENTRIES / 3) {
+            segmentsize = MAXENTRIES / 3;
+        }
+        nsegments = Math.floor((MAXENTRIES + segmentsize - 5) / segmentsize);
+        if (nsegments < 0) {
+            nsegments = 1;
+        }
+        if (nsegments > MAXNSEGMENTS) {
+            setsegments = MAXNSEGMENTS;
+        } else {
+            setsegments = nsegments;
+        }
+        random.reseed();
+        return [];
+        segmentAlgorithms[algorithm]();
+    } else {
+        // Use default colors
+        segments = [
+            [0, 0, 0],
+            [120, 119, 238],
+            [24, 7, 25],
+            [197, 66, 28],
+            [29, 18, 11],
+            [135, 46, 71],
+            [24, 27, 13],
+            [241, 230, 128],
+            [17, 31, 24],
+            [240, 162, 139],
+            [11, 4, 30],
+            [106, 87, 189],
+            [29, 21, 14],
+            [12, 140, 118],
+            [10, 6, 29],
+            [50, 144, 77],
+            [22, 0, 24],
+            [148, 188, 243],
+            [4, 32, 7],
+            [231, 146, 14],
+            [10, 13, 20],
+            [184, 147, 68],
+            [13, 28, 3],
+            [169, 248, 152],
+            [4, 0, 34],
+            [62, 83, 48],
+            [7, 21, 22],
+            [152, 97, 184],
+            [8, 3, 12],
+            [247, 92, 235],
+            [31, 32, 16]
+        ];
+        segmentsize = 8;
+        nsegments = Math.floor(255 / segmentsize);
+        setsegments = Math.floor((MAXENTRIES + 3) / segmentsize);
+    }
+
+    for (i = 0; i < setsegments; i++) {
+        r = segments[i % nsegments][0];
+        g = segments[i % nsegments][1];
+        b = segments[i % nsegments][2];
+        rs = (segments[(i + 1) % setsegments % nsegments][0] - r) / segmentsize;
+        gs = (segments[(i + 1) % setsegments % nsegments][1] - g) / segmentsize;
+        bs = (segments[(i + 1) % setsegments % nsegments][2] - b) / segmentsize;
+        for (y = 0; y < segmentsize; y++) {
+            palette.push([Math.floor(r), Math.floor(g), Math.floor(b)]);
+            r += rs;
+            g += gs;
+            b += bs;
+        }
+    }
+
+    return palette;
 };
 
 var fractal = {
@@ -1218,36 +1369,26 @@ var fractal = {
         radius: { x: 2.5, y : 2.5 },
         angle: 0
     },
-    formula: function(zr, zi, cr, ci) {
-        var maxiter = 128;
-        var bailout = 4;
-        var h = maxiter / 2;
-        var q = maxiter / 4;
-        var count = 0;
+    formula: function(palette, zr, zi, cr, ci) {
+        var maxiter = 128,
+            bailout = 4,
+            i = maxiter;
 
-        while (count < maxiter) {
+        while (i--) {
             var zr2 = zr * zr;
             var zi2 = zi * zi;
 
             if (zr2 + zi2 > bailout) {
-                return {
-                    a: 0xff,
-                    r: (count * 255) / maxiter,
-                    g: ((count % h) * 255) / h,
-                    b: ((count % q) * 255) / q
-                };
+                return palette[(maxiter - i) % palette.length];
             }
 
             zi = ci + (2 * zr * zi);
             zr = cr + zr2 - zi2;
-            count++;
         }
 
-        if (count === maxiter) {
-            return {a: 0xff, r: 0, g: 0, b: 0};
-        }
-    }
+        return palette[0];
+    },
+    palette: xaos.makePalette()
 };
 
-canvas = document.getElementById("canvas");
-xaos.zoom(canvas, fractal);
+xaos.zoom(document.getElementById("canvas"), fractal);
