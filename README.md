@@ -1,16 +1,16 @@
-TRY IT
+# Try It
 
-Currently, a live demo is hosted at http://jblangston.com/xaos.
+[Try](http://jblang.github.io/XaoSjs) the live demo!
 
-ABOUT
+# About
 
 XaoS.js is a real-time fractal zoomer.  Instead of drawing a box and waiting for the fractal
 to re-draw, it allows you to dive into the fractal in realtime.
 
-It a JavaScript adaptation of the Hubicka algorithm from XaoS (http://xaos.sf.net).
-The zooming code was adapted from Java by way of JAME (http://fractalwalk.net).
+It a JavaScript adaptation of the Hubicka algorithm from [XaoS](http://xaos.sf.net).
+The zooming code was adapted from Java by way of [JAME](http://fractalwalk.net).
 
-LICENSE
+# License
 
 XaoS.js is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
