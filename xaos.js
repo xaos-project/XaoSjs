@@ -1234,7 +1234,7 @@ xaos.makePalette = function(algorithm, seed) {
                 MAGICMUL = 1103515245,
                 MAGICADD = 12345;
 
-            state = (state * MAGICMUL + MAGICADD) & MAXRAND;
+            state = (Math.imul(state, MAGICMUL) + MAGICADD) & MAXRAND;
             return i ? Math.floor(state / MAXRAND) * i : state;
         };
         random.reseed = function() {
@@ -1302,7 +1302,6 @@ xaos.makePalette = function(algorithm, seed) {
             setsegments = nsegments;
         }
         random.reseed();
-        return [];
         segmentAlgorithms[algorithm]();
     } else {
         // Use default colors
