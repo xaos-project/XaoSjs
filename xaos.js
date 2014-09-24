@@ -34,7 +34,6 @@ xaos.zoom = function(canvas, fractal) {
         USE_SYMMETRY = false,
         RANGES = 2,
         RANGE = 4,
-        STEPS = 8,
         MASK = 0x7,
         DSIZE = (RANGES + 1),
         FPMUL = 64,
@@ -42,88 +41,108 @@ xaos.zoom = function(canvas, fractal) {
         MAX_PRICE = Number.MAX_VALUE,
         NEW_PRICE = FPRANGE * FPRANGE,
         mouse = { x: 0, y: 0, button: [false, false, false] },
-        context = canvas.getContext("2d"),
         bufferWidth = canvas.width,
         renderMode = MODE_CALCULATE;
-    var renderedData = (function() {
-        var initArray = function(size, initial) {
-            var data = [], i;
-            for (i = 0; i < size; i += 1) {
-                data[i] = typeof initial === "object" ? Object.create(initial) : initial;
+
+    /** Utility function to pre-allocate an array of the specified size
+     * with the specified initial value. It will do the right thing
+     * to create unique items, whether you pass in a prototype, a
+     * constructor, or a primitive.
+     * @param {number} size - the size of the array.
+     * @param initial - the initial value for each entry.
+     */
+    function preAllocArray(size, initial) {
+        var i, data = [];
+        for (i = 0; i < size; i += 1) {
+            if (typeof initial === "object") {
+                // prototype object
+                data[i] = Object.create(initial);
+            } else if (typeof initial === "function") {
+                // constructor
+                data[i] = new initial();
+            } else {
+                // primitive
+                data[i] = initial;
             }
-            return data;
-        };
-        var initTable = function(size) {
-            var prototype = {
-                length : 0,
-                from : 0,
-                to : 0
-            };
-            return initArray(size, prototype);
-        };
-        var initDynamic = function(size) {
-            var prototype = {
-                previous : null,
-                pos : 0,
-                price : 0
-            };
-            return {
-                delta : initArray(size + 1, 0),
-                oldBest : initArray(size, prototype),
-                newBest : initArray(size, prototype),
-                calData : initArray(size, prototype),
-                conData : initArray(size << DSIZE, prototype),
-                swap: function() {
-                    var tmpBest = this.oldBest;
-                    this.oldBest = this.newBest;
-                    this.newBest = tmpBest;
-                }
-            };
-        };
-        var initRealloc = function(size, line) {
-            var prototype, data, i;
-            prototype = {
-                recalculate : false,
-                dirty : false,
-                line : line,
-                pos : 0,
-                plus : 0,
-                symTo : 0,
-                symRef : 0,
-                position : 0,
-                priority : 0
-            };
-            data = initArray(size, prototype);
-            for (i = 0; i < size; i++) {
-                data[i].pos = i;
-            }
-            return data;
-        };
-        var newImage = context.createImageData(canvas.width, canvas.height);
-        var oldImage = context.createImageData(canvas.width, canvas.height);
-        var newBuffer = new Uint32Array(newImage.data.buffer);
-        var oldBuffer = new Uint32Array(oldImage.data.buffer);
-        return {
-            newImage : newImage,
-            oldImage : oldImage,
-            newBuffer: newBuffer,
-            oldBuffer: oldBuffer,
-            positionX : initArray(canvas.width, 0),
-            positionY : initArray(canvas.height, 0),
-            reallocX : initRealloc(canvas.width, false),
-            reallocY : initRealloc(canvas.height, true),
-            dynamicX : initDynamic(canvas.width),
-            dynamicY : initDynamic(canvas.height),
-            moveTable : initTable(canvas.width + 1),
-            fillTable : initTable(canvas.width + 1),
-            queue : initRealloc(canvas.width + canvas.height, false),
-            startTime : 0,
-            fudgeFactor: 0,
-            position : initArray(STEPS, 0),
-            offset : initArray(STEPS, 0),
-            incomplete: 0
-        };
-    }());
+        }
+        return data;
+    }
+
+    /** Creates a single entry for a move or fill table.
+     * @constructor
+     */
+    function TableEntry() {
+        this.length = 0;
+        this.from = 0;
+        this.to = 0;
+    }
+
+    /** Creates a single entry for a dynamic data table.
+     * @constructor
+     */
+    function DynamicEntry() {
+        this.previous = null;
+        this.pos = 0;
+        this.price = 0;
+    }
+
+    /** Creates a single entry for a reallocation table.
+     * @constructor
+     */
+    function ReallocEntry() {
+        this.recalculate = false;
+        this.dirty = false;
+        this.line = false;
+        this.pos = 0;
+        this.plus = 0;
+        this.symTo = 0;
+        this.symRef = 0;
+        this.position = 0.0;
+        this.priority = 0.0;
+    }
+
+    /** Container for dynamic algorithm data.
+     * @param {number} size - the number of entries to allocate.
+     * @constructor
+     */
+    function DynamicContainer(size) {
+        this.delta = preAllocArray(size + 1, 0);
+        this.oldBest = preAllocArray(size, DynamicEntry);
+        this.newBest = preAllocArray(size, DynamicEntry);
+        this.calData = preAllocArray(size, DynamicEntry);
+        this.conData = preAllocArray(size << DSIZE, DynamicEntry);
+    }
+
+
+    /** Swaps the old and new best prices in the dynamic container. */
+    DynamicContainer.prototype.swap = function() {
+        var tmpBest = this.oldBest;
+        this.oldBest = this.newBest;
+        this.newBest = tmpBest;
+    };
+
+    /* Container for all zoom context data for a particular canvas. */
+    function ZoomContext(context) {
+        this.context = context;
+        this.newImage = context.createImageData(canvas.width, canvas.height);
+        this.newBuffer = new Uint32Array(this.newImage.data.buffer);
+        this.oldImage = context.createImageData(canvas.width, canvas.height);
+        this.oldBuffer = new Uint32Array(this.oldImage.data.buffer);
+        this.positionX = preAllocArray(canvas.width, 0.0);
+        this.positionY = preAllocArray(canvas.height, 0.0);
+        this.reallocX = preAllocArray(canvas.width, ReallocEntry);
+        this.reallocY = preAllocArray(canvas.height, ReallocEntry);
+        this.dynamicX = new DynamicContainer(canvas.width);
+        this.dynamicY = new DynamicContainer(canvas.height);
+        this.moveTable = preAllocArray(canvas.width + 1, TableEntry);
+        this.fillTable = preAllocArray(canvas.width + 1, TableEntry);
+        this.queue = preAllocArray(canvas.width + canvas.height, ReallocEntry);
+        this.startTime = 0;
+        this.fudgeFactor = 0;
+        this.incomplete = false;
+    }
+
+    var renderedData = new ZoomContext(canvas.getContext("2d"));
 
     var convertArea = function() {
         var radius = fractal.region.radius;
@@ -142,9 +161,7 @@ xaos.zoom = function(canvas, fractal) {
         };
     };
 
-    var drawFractal = function(dynamic) {
-        var start = new Date().getTime();
-        var percent = 0;
+    var drawFractal = function() {
         var area = convertArea();
 
         var isVerticalSymmetrySupported = (USE_SYMMETRY && fractal.symmetry && typeof fractal.symmetry.y === "number") || false;
@@ -168,9 +185,9 @@ xaos.zoom = function(canvas, fractal) {
             var flag = 0;
             var size = realloc.length;
             var step = (end - begin) / size;
-
             var tofix = (size * FPMUL) / (end - begin);
             var delta = dynamic.delta;
+
             delta[size] = Number.MAX_VALUE;
             for (i = size - 1; i >= 0; i--) {
                 delta[i] = ((position[i] - begin) * tofix)|0;
@@ -359,21 +376,18 @@ xaos.zoom = function(canvas, fractal) {
             return step;
         };
 
-        var initReallocTableAndPosition = function(realloc, position, begin, end) {
-            var step = (end - begin) / realloc.length;
-            var tmpPosition = begin;
-            var tmpRealloc = null;
-            var i;
-            for (i = 0; i < realloc.length; i++) {
-                tmpRealloc = realloc[i];
-                position[i] = tmpPosition;
-                tmpRealloc.position = tmpPosition;
-                tmpRealloc.recalculate = true;
-                tmpRealloc.dirty = true;
-                tmpRealloc.plus = i;
-                tmpRealloc.symTo = -1;
-                tmpRealloc.symRef = -1;
-                tmpPosition += step;
+        var initReallocTableAndPosition = function(realloc, position, begin, end, line) {
+            var i, p, step = (end - begin) / realloc.length;
+            for (i = 0, p = begin; i < realloc.length; i++, p += step) {
+                position[i] = p;
+                realloc[i].recalculate = true;
+                realloc[i].dirty = true;
+                realloc[i].line = line;
+                realloc[i].pos = i;
+                realloc[i].position = p;
+                realloc[i].plus = i;
+                realloc[i].symTo = -1;
+                realloc[i].symRef = -1;
             }
             return step;
         };
@@ -744,7 +758,7 @@ xaos.zoom = function(canvas, fractal) {
         };
 
         var copy = function() {
-            context.putImageData(renderedData.newImage, 0, 0);
+            renderedData.context.putImageData(renderedData.newImage, 0, 0);
         };
 
         var calcPrice = function(p1, p2) {
@@ -867,7 +881,7 @@ xaos.zoom = function(canvas, fractal) {
             copy();
         };
 
-        var processReallocTable = function(dynamic) {
+        var processReallocTable = function() {
             var total = 0;
             renderedData.incomplete = false;
             total = initPrices(renderedData.queue, total, renderedData.reallocX);
@@ -908,7 +922,7 @@ xaos.zoom = function(canvas, fractal) {
             if (((renderMode & MODE_CALCULATE) === 0) && USE_XAOS) {
                 stepy = makeReallocTable(renderedData.reallocY, renderedData.dynamicY, beginy, endy, renderedData.positionY);
             } else {
-                stepy = initReallocTableAndPosition(renderedData.reallocY, renderedData.positionY, beginy, endy);
+                stepy = initReallocTableAndPosition(renderedData.reallocY, renderedData.positionY, beginy, endy, true);
             }
             symy = fractal.symmetry && fractal.symmetry.y;
             if (isVerticalSymmetrySupported && !((beginy > symy) || (symy > endy))) {
@@ -924,7 +938,7 @@ xaos.zoom = function(canvas, fractal) {
             if (((renderMode & MODE_CALCULATE) === 0) && USE_XAOS) {
                 stepx = makeReallocTable(renderedData.reallocX, renderedData.dynamicX, beginx, endx, renderedData.positionX);
             } else {
-                stepx = initReallocTableAndPosition(renderedData.reallocX, renderedData.positionX, beginx, endx);
+                stepx = initReallocTableAndPosition(renderedData.reallocX, renderedData.positionX, beginx, endx, false);
             }
             symx = fractal.symmetry && fractal.symmetry.x;
             if (isHorizontalSymmetrySupported && (!((beginx > symx) || (symx > endx)))) {
@@ -937,10 +951,10 @@ xaos.zoom = function(canvas, fractal) {
         prepareLines();
         prepareColumns();
         move();
-        processReallocTable(dynamic);
+        processReallocTable();
         updatePosition();
         renderMode = 0;
-        var fps = 1000 / (new Date().getTime() - renderedData.startTime)
+        var fps = 1000 / (new Date().getTime() - renderedData.startTime);
         if (fps < fractal.minFPS) {
             renderedData.fudgeFactor++;
         } else if (fps > fractal.minFPS + 10 && renderedData.fudgeFactor > 0) {
@@ -984,7 +998,7 @@ xaos.zoom = function(canvas, fractal) {
     var doZoom = function() {
         if (updateRegion() || renderedData.incomplete) {
             requestAnimationFrame(doZoom);
-            drawFractal(true);
+            drawFractal();
         }
     };
 
@@ -1010,7 +1024,7 @@ xaos.zoom = function(canvas, fractal) {
         mouse.button = [false, false, false];
     };
 
-    drawFractal(true);
+    drawFractal();
 };
 
 xaos.makePalette = function(algorithm, seed) {
