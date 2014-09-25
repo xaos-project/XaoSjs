@@ -121,12 +121,16 @@ xaos.zoom = function(canvas, fractal) {
         this.newBest = tmpBest;
     };
 
-    /* Container for all zoom context data for a particular canvas. */
-    function ZoomContext(context) {
-        this.context = context;
-        this.newImage = context.createImageData(canvas.width, canvas.height);
+    /** Container for all zoom context data for a particular canvas.
+     *
+     * @param canvas {Canvas} HTML5 canvas on which to draw the fractal.
+     * @constructor
+     */
+    function ZoomContext(canvas) {
+        this.context = canvas.getContext("2d");
+        this.newImage = this.context.createImageData(canvas.width, canvas.height);
         this.newBuffer = new Uint32Array(this.newImage.data.buffer);
-        this.oldImage = context.createImageData(canvas.width, canvas.height);
+        this.oldImage = this.context.createImageData(canvas.width, canvas.height);
         this.oldBuffer = new Uint32Array(this.oldImage.data.buffer);
         this.positionX = preAllocArray(canvas.width, 0.0);
         this.positionY = preAllocArray(canvas.height, 0.0);
@@ -142,7 +146,7 @@ xaos.zoom = function(canvas, fractal) {
         this.incomplete = false;
     }
 
-    var renderedData = new ZoomContext(canvas.getContext("2d"));
+    var renderedData = new ZoomContext(canvas);
 
     var convertArea = function() {
         var radius = fractal.region.radius;
@@ -486,9 +490,28 @@ xaos.zoom = function(canvas, fractal) {
             }
         };
 
+        /** Optimized array copy using Duff's Device.
+         *
+         * @param from {Array} source array
+         * @param fromOffset {number} offset into source array
+         * @param to {Array} target array
+         * @param toOffset {number} offset into target array
+         * @param length {number} elements to copy
+         */
         var arrayCopy = function(from, fromOffset, to, toOffset, length) {
-            // Using TypedArray set and subarray methods is actually slower than this
-            while (length--) {
+            var n = length % 8;
+            while (n--) {
+                to[toOffset++] = from[fromOffset++];
+            }
+            n = (length / 8) | 0;
+            while (n--) {
+                to[toOffset++] = from[fromOffset++];
+                to[toOffset++] = from[fromOffset++];
+                to[toOffset++] = from[fromOffset++];
+                to[toOffset++] = from[fromOffset++];
+                to[toOffset++] = from[fromOffset++];
+                to[toOffset++] = from[fromOffset++];
+                to[toOffset++] = from[fromOffset++];
                 to[toOffset++] = from[fromOffset++];
             }
         };
