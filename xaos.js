@@ -40,6 +40,7 @@ xaos.zoom = function(canvas, fractal) {
         FPRANGE = FPMUL * RANGE,
         MAX_PRICE = Number.MAX_VALUE,
         NEW_PRICE = FPRANGE * FPRANGE,
+        GUESS_RANGE = 4,
         mouse = { x: 0, y: 0, button: [false, false, false] },
         bufferWidth = canvas.width,
         renderMode = MODE_CALCULATE;
@@ -47,6 +48,7 @@ xaos.zoom = function(canvas, fractal) {
     var area = convertArea();
     var isVerticalSymmetrySupported = (USE_SYMMETRY && fractal.symmetry && typeof fractal.symmetry.y === "number") || false;
     var isHorizontalSymmetrySupported = (USE_SYMMETRY && fractal.symmetry && typeof fractal.symmetry.x === "number") || false;
+    var isSolidguessSupported = true;
 
     /** Utility function to pre-allocate an array of the specified size
      * with the specified initial value. It will do the right thing
@@ -167,7 +169,7 @@ xaos.zoom = function(canvas, fractal) {
                 y: (center.y + size / 2) / aspect
             }
         };
-    };
+    }
 
     function makeReallocTable (realloc, dynamic, begin, end, position) {
         var tmpRealloc = null;
@@ -177,7 +179,7 @@ xaos.zoom = function(canvas, fractal) {
         var bestPrice = MAX_PRICE;
         var price = 0;
         var price1 = 0;
-        var i = 0;
+        var i;
         var y = 0;
         var p = 0;
         var ps = 0;
@@ -376,7 +378,7 @@ xaos.zoom = function(canvas, fractal) {
         }
         newPositions(realloc, size, begin, end, step, position, flag);
         return step;
-    };
+    }
 
     function initReallocTableAndPosition(realloc, position, begin, end, line) {
         var i, p, step = (end - begin) / realloc.length;
@@ -392,10 +394,10 @@ xaos.zoom = function(canvas, fractal) {
             realloc[i].symRef = -1;
         }
         return step;
-    };
+    }
 
     function prepareSymmetry(realloc, symi, symPosition, step) {
-        var i = 0;
+        var i;
         var j = 0;
         var tmp;
         var abs;
@@ -486,7 +488,7 @@ xaos.zoom = function(canvas, fractal) {
                 tmpRealloc.position = symPosition - symRealloc.position;
             }
         }
-    };
+    }
 
     /** Optimized array copy using Duff's Device.
      *
@@ -512,12 +514,12 @@ xaos.zoom = function(canvas, fractal) {
             to[toOffset++] = from[fromOffset++];
             to[toOffset++] = from[fromOffset++];
         }
-    };
+    }
 
     function doSymmetry(reallocX, reallocY) {
         var from_offset = 0;
         var to_offset = 0;
-        var i = 0;
+        var i;
         var j = 0;
         var newRGB = renderedData.newBuffer;
         for (i = 0; i < reallocY.length; i++) {
@@ -540,7 +542,7 @@ xaos.zoom = function(canvas, fractal) {
                 reallocX[i].dirty = false;
             }
         }
-    };
+    }
 
     function newPositions(realloc, size, begin1, end1, step, position, flag) {
         var tmpRealloc = null;
@@ -614,7 +616,7 @@ xaos.zoom = function(canvas, fractal) {
             }
             s = e;
         }
-    };
+    }
 
     function prepareMove(movetable, reallocX) {
         var tmpData = null;
@@ -641,7 +643,7 @@ xaos.zoom = function(canvas, fractal) {
         }
         tmpData = movetable[s];
         tmpData.length = 0;
-    };
+    }
 
     function doMove(movetable, reallocY) {
         var tmpData = null;
@@ -649,7 +651,7 @@ xaos.zoom = function(canvas, fractal) {
         var old_offset = 0;
         var from = 0;
         var to = 0;
-        var i = 0;
+        var i;
         var s = 0;
         var length = 0;
         var newData = renderedData.newBuffer;
@@ -668,16 +670,16 @@ xaos.zoom = function(canvas, fractal) {
             }
             new_offset += bufferWidth;
         }
-    };
+    }
 
     function move() {
         prepareMove(renderedData.moveTable, renderedData.reallocX);
         doMove(renderedData.moveTable, renderedData.reallocY);
-    };
+    }
 
     function prepareFill(filltable, reallocX) {
         var tmpData = null;
-        var i = 0;
+        var i;
         var j = 0;
         var k = 0;
         var s = 0;
@@ -685,7 +687,7 @@ xaos.zoom = function(canvas, fractal) {
         for (i = 0; i < reallocX.length; i++) {
             if (reallocX[i].dirty) {
                 j = i - 1;
-                for (k = i + 1; (k < reallocX.length) && reallocX[k].dirty; k++);
+                for (k = i + 1; (k < reallocX.length) && reallocX[k].dirty; k++) {}
                 while ((i < reallocX.length) && reallocX[i].dirty) {
                     if ((k < reallocX.length) && ((j < i) || ((reallocX[i].position - reallocX[j].position) > (reallocX[k].position - reallocX[i].position)))) {
                         j = k;
@@ -709,7 +711,7 @@ xaos.zoom = function(canvas, fractal) {
         }
         tmpData = filltable[s];
         tmpData.length = 0;
-    };
+    }
 
     function doFill(filltable, reallocY) {
         var tmpData = null;
@@ -717,7 +719,7 @@ xaos.zoom = function(canvas, fractal) {
         var to_offset = 0;
         var from = 0;
         var to = 0;
-        var i = 0;
+        var i;
         var j = 0;
         var k = 0;
         var t = 0;
@@ -727,7 +729,7 @@ xaos.zoom = function(canvas, fractal) {
         for (i = 0; i < reallocY.length; i++) {
             if (reallocY[i].dirty) {
                 j = i - 1;
-                for (k = i + 1; (k < reallocY.length) && reallocY[k].dirty; k++);
+                for (k = i + 1; (k < reallocY.length) && reallocY[k].dirty; k++) {}
                 while ((i < reallocY.length) && reallocY[i].dirty) {
                     if ((k < reallocY.length) && ((j < i) || ((reallocY[i].position - reallocY[j].position) > (reallocY[k].position - reallocY[i].position)))) {
                         j = k;
@@ -768,7 +770,7 @@ xaos.zoom = function(canvas, fractal) {
                 reallocY[i].dirty = true;
             }
         }
-    };
+    }
 
     function fill() {
         if (isVerticalSymmetrySupported && isHorizontalSymmetrySupported) {
@@ -776,15 +778,15 @@ xaos.zoom = function(canvas, fractal) {
         }
         prepareFill(renderedData.fillTable, renderedData.reallocX);
         doFill(renderedData.fillTable, renderedData.reallocY);
-    };
+    }
 
     function copy() {
         renderedData.context.putImageData(renderedData.newImage, 0, 0);
-    };
+    }
 
     function calcPrice(p1, p2) {
         return (p1 - p2) * (p1 - p2);
-    };
+    }
 
     function addPrices(realloc, r1, r2) {
         var r3;
@@ -797,10 +799,10 @@ xaos.zoom = function(canvas, fractal) {
             addPrices(realloc, r1, r3);
             r1 = r3 + 1;
         }
-    };
+    }
 
     function initPrices(queue, total, realloc) {
-        var i = 0;
+        var i;
         var j = 0;
         for (i = 0; i < realloc.length; i++) {
             if (realloc[i].recalculate) {
@@ -815,7 +817,7 @@ xaos.zoom = function(canvas, fractal) {
             }
         }
         return total;
-    };
+    }
 
     function sortQueue(queue, l, r) {
         var m = (queue[l].priority + queue[r].priority) / 2.0;
@@ -844,53 +846,199 @@ xaos.zoom = function(canvas, fractal) {
         if (r > i) {
             sortQueue(queue, i, r);
         }
-    };
+    }
 
-    function renderLine(realloc, reallocX) {
+    function renderLine(realloc, reallocX, reallocY) {
         var position = realloc.position;
         var r = realloc.pos;
         var offset = r * bufferWidth;
+        var i;
+        var j;
         var k;
-        var len;
-        var current;
+        var n;
+        var distl;
+        var distr;
+        var distu;
+        var distd;
+        var offsetu;
+        var offsetd;
+        var offsetl;
+        var offsetul;
+        var offsetur;
+        var offsetdl;
+        var offsetdr;
+        var rend = r - GUESS_RANGE;
         var newRGB = renderedData.newBuffer;
-        for (k = 0,len = reallocX.length; k < len; k++) {
-            current = reallocX[k];
-            if (!current.dirty) {
-                newRGB[offset] = fractal.formula(current.position, position);
+        var length;
+        var current;
+        if (rend < 0) {
+            rend = 0;
+        }
+        for (i = r - 1; (i >= rend) && reallocY[i].dirty; i--) {}
+        distu = r - i;
+        rend = r + GUESS_RANGE;
+        if (rend >= reallocY.length) {
+            rend = reallocY.length - 1;
+        }
+        for (j = r + 1; (j < rend) && reallocY[j].dirty; j++) {}
+        distd = j - r;
+        if ((!isSolidguessSupported) || (i < 0) || (j >= reallocY.length) || reallocY[i].dirty || reallocY[j].dirty) {
+            for (k = 0, length = reallocX.length; k < length; k++) {
+                current = reallocX[k];
+                if (!reallocX[k].dirty) {
+                    newRGB[offset] = fractal.formula(current.position, position);
+                }
+                offset += 1;
             }
-            offset++;
+        } else {
+            distr = 0;
+            distl = Number.MAX_VALUE / 2;
+            offsetu = offset - (distu * bufferWidth);
+            offsetd = offset + (distd * bufferWidth);
+            for (k = 0, length = reallocX.length; k < length; k++) {
+                current = reallocX[k];
+                if (!reallocX[k].dirty) {
+                    if (distr <= 0) {
+                        rend = k + GUESS_RANGE;
+                        if (rend >= reallocX.length) {
+                            rend = reallocX.length - 1;
+                        }
+                        for (j = k + 1; (j < rend) && reallocX[j].dirty; j++) {
+                            distr = j - k;
+                        }
+                        if (j >= rend) {
+                            distr = Number.MAX_VALUE / 2;
+                        }
+                    }
+                    if ((distr < (Number.MAX_VALUE / 4)) && (distl < (Number.MAX_VALUE / 4))) {
+                        offsetl = offset - distl;
+                        offsetul = offsetu - distl;
+                        offsetdl = offsetd - distl;
+                        offsetur = offsetu + distr;
+                        offsetdr = offsetd + distr;
+                        n = newRGB[offsetl];
+                        if ((n == newRGB[offsetu]) && (n == newRGB[offsetd]) && (n == newRGB[offsetul]) && (n == newRGB[offsetur]) && (n == newRGB[offsetdl]) && (n == newRGB[offsetdr])) {
+                            newRGB[offset] = n;
+                        } else {
+                            newRGB[offset] = fractal.formula(current.position, position);
+                        }
+                    } else {
+                        newRGB[offset] = fractal.formula(current.position, position);
+                    }
+                    distl = 0;
+                }
+                offset += 1;
+                offsetu += 1;
+                offsetd += 1;
+                distr -= 1;
+                distl += 1;
+            }
         }
         realloc.recalculate = false;
         realloc.dirty = false;
-    };
+    }
 
-    function renderColumn(realloc, reallocY) {
+    function renderColumn(realloc, reallocX, reallocY) {
         var position = realloc.position;
-        var offset = realloc.pos;
-        var current;
+        var r = realloc.pos;
+        var offset = r;
+        var rend = r - GUESS_RANGE;
+        var i;
+        var j;
         var k;
+        var n;
+        var distl;
+        var distr;
+        var distu;
+        var distd;
+        var offsetl;
+        var offsetr;
+        var offsetu;
+        var offsetlu;
+        var offsetru;
+        var offsetld;
+        var offsetrd;
+        var sumu;
+        var sumd;
         var newRGB = renderedData.newBuffer;
-        var len;
-        for (k = 0,len = reallocY.length; k < len; k++) {
-            current = reallocY[k];
-            if (!current.dirty) {
-                newRGB[offset] = fractal.formula(position, current.position);
+        var length;
+        var current;
+        if (rend < 0) {
+            rend = 0;
+        }
+        for (i = r - 1; (i >= rend) && reallocX[i].dirty; i--) {}
+        distl = r - i;
+        rend = r + GUESS_RANGE;
+        if (rend >= reallocX.length) {
+            rend = reallocX.length - 1;
+        }
+        for (j = r + 1; (j < rend) && reallocX[j].dirty; j++) {}
+        distr = j - r;
+        if ((!isSolidguessSupported) || (i < 0) || (j >= reallocX.length) || reallocX[i].dirty || reallocX[j].dirty) {
+            for (k = 0, length = reallocY.length; k < length; k++) {
+                current = reallocY[k];
+                if (!reallocY[k].dirty) {
+                    newRGB[offset] = fractal.formula(position, current.position);
+                }
+                offset += bufferWidth;
             }
-            offset += bufferWidth;
+        } else {
+            distd = 0;
+            distu = Number.MAX_VALUE / 2;
+            offsetl = offset - distl;
+            offsetr = offset + distr;
+            for (k = 0, length = reallocY.length; k < length; k++) {
+                current = reallocY[k];
+                if (!reallocY[k].dirty) {
+                    if (distd <= 0) {
+                        rend = k + GUESS_RANGE;
+                        if (rend >= reallocY.length) {
+                            rend = reallocY.length - 1;
+                        }
+                        for (j = k + 1; (j < rend) && reallocY[j].dirty; j++) {
+                            distd = j - k;
+                        }
+                        if (j >= rend) {
+                            distd = Number.MAX_VALUE / 2;
+                        }
+                    }
+                    if ((distd < (Number.MAX_VALUE / 4)) && (distu < (Number.MAX_VALUE / 4))) {
+                        sumu = distu * bufferWidth;
+                        sumd = distd * bufferWidth;
+                        offsetu = offset - sumu;
+                        offsetlu = offsetl - sumu;
+                        offsetru = offsetr - sumu;
+                        offsetld = offsetl + sumd;
+                        offsetrd = offsetr + sumd;
+                        n = newRGB[offsetu];
+                        if ((n == newRGB[offsetl]) && (n == newRGB[offsetr]) && (n == newRGB[offsetlu]) && (n == newRGB[offsetru]) && (n == newRGB[offsetld]) && (n == newRGB[offsetrd])) {
+                            newRGB[offset] = n;
+                        } else {
+                            newRGB[offset] = fractal.formula(position, current.position);
+                        }
+                    } else {
+                        newRGB[offset] = fractal.formula(position, current.position);
+                    }
+                    distu = 0;
+                }
+                offset += bufferWidth;
+                offsetl += bufferWidth;
+                offsetr += bufferWidth;
+                distd -= 1;
+                distu += 1;
+            }
         }
         realloc.recalculate = false;
         realloc.dirty = false;
-    };
-
+    }
     function processQueue(size) {
-        var i = 0,
+        var i,
             newTime;
         for (i = 0; i < size; i++) {
             if (renderedData.queue[i].line) {
-                renderLine(renderedData.queue[i], renderedData.reallocX);
+                renderLine(renderedData.queue[i], renderedData.reallocX, renderedData.reallocY);
             } else {
-                renderColumn(renderedData.queue[i], renderedData.reallocY);
+                renderColumn(renderedData.queue[i], renderedData.reallocX, renderedData.reallocY);
             }
             newTime = new Date().getTime();
             if ((renderMode & MODE_CALCULATE) === 0 && (1000 / (newTime - renderedData.startTime + renderedData.fudgeFactor) <= fractal.minFPS) && (i < size)) {
@@ -900,7 +1048,7 @@ xaos.zoom = function(canvas, fractal) {
             }
         }
         copy();
-    };
+    }
 
     function processReallocTable() {
         var total = 0;
@@ -913,7 +1061,7 @@ xaos.zoom = function(canvas, fractal) {
             }
             processQueue(total);
         }
-    };
+    }
 
     function swapBuffers() {
         var tmp = renderedData.oldBuffer;
@@ -922,7 +1070,7 @@ xaos.zoom = function(canvas, fractal) {
         tmp = renderedData.oldImage;
         renderedData.newImage = renderedData.oldImage;
         renderedData.oldImage = tmp;
-    };
+    }
 
     function updatePosition() {
         var k;
@@ -933,7 +1081,7 @@ xaos.zoom = function(canvas, fractal) {
         for (k = 0,len = renderedData.reallocY.length; k < len; k++) {
             renderedData.positionY[k] = renderedData.reallocY[k].position;
         }
-    };
+    }
 
     function prepareLines() {
         var beginy = area.begin.y;
@@ -949,7 +1097,7 @@ xaos.zoom = function(canvas, fractal) {
         if (isVerticalSymmetrySupported && !((beginy > symy) || (symy > endy))) {
             prepareSymmetry(renderedData.reallocY, Math.floor((symy - beginy) / stepy), symy, stepy);
         }
-    };
+    }
 
     function prepareColumns() {
         var beginx = area.begin.x;
@@ -965,7 +1113,7 @@ xaos.zoom = function(canvas, fractal) {
         if (isHorizontalSymmetrySupported && (!((beginx > symx) || (symx > endx)))) {
             prepareSymmetry(renderedData.reallocX, Math.floor((symx - beginx) / stepx), symx, stepx);
         }
-    };
+    }
 
     function drawFractal() {
         renderedData.startTime = new Date().getTime();
@@ -982,8 +1130,8 @@ xaos.zoom = function(canvas, fractal) {
         } else if (fps > fractal.minFPS + 10 && renderedData.fudgeFactor > 0) {
             renderedData.fudgeFactor--;
         }
-        console.log(fps + " fps");
-    };
+        //console.log(fps + " fps");
+    }
 
     function updateRegion() {
         var MAXSTEP = 0.008 * 3;
@@ -1016,14 +1164,14 @@ xaos.zoom = function(canvas, fractal) {
         fractal.region.center.x = (area.begin.x + area.end.x) / 2;
         fractal.region.center.y = ((area.begin.y + area.end.y) / 2) * (canvas.width / canvas.height);
         return true;
-    };
+    }
 
     function doZoom() {
         if (updateRegion() || renderedData.incomplete) {
             requestAnimationFrame(doZoom);
             drawFractal();
         }
-    };
+    }
 
     canvas.onmousedown = function(e) {
         mouse.button[e.button] = true;
@@ -1039,18 +1187,18 @@ xaos.zoom = function(canvas, fractal) {
         mouse.y = e.offsetY || (e.clientY - canvas.offsetTop);
     };
 
-    canvas.oncontextmenu = function(e) {
+    canvas.oncontextmenu = function() {
         return false;
     };
 
-    canvas.onmouseout = function(e) {
+    canvas.onmouseout = function() {
         mouse.button = [false, false, false];
     };
 
     drawFractal();
 };
 
-xaos.makePalette = function(algorithm, seed) {
+xaos.makePalette = function() {
     var MAXENTRIES = 65536,
         segmentsize,
         setsegments,
@@ -1123,14 +1271,12 @@ var fractal = {
     z0: { x: 0, y: 0 },
     maxiter: 512,
     bailout: 4,
-    minFPS: 30,
-    formula: function(x, y) {
+    minFPS: 50,
+    formula: function(cr, ci) {
         var maxiter = this.maxiter,
             bailout = this.bailout,
             zr = this.z0.x,
             zi = this.z0.y,
-            cr = x,
-            ci = y,
             i = maxiter;
 
         while (i--) {
