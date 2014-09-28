@@ -142,8 +142,7 @@ xaos.zoom = function(canvas, fractal) {
         this.positionY = preAllocArray(canvas.height, 0.0);
         this.reallocX = preAllocArray(canvas.width, ReallocEntry);
         this.reallocY = preAllocArray(canvas.height, ReallocEntry);
-        this.dynamicX = new DynamicContainer(canvas.width);
-        this.dynamicY = new DynamicContainer(canvas.height);
+        this.dynamic = new DynamicContainer(Math.max(canvas.width, canvas.height));
         this.moveTable = preAllocArray(canvas.width + 1, TableEntry);
         this.fillTable = preAllocArray(canvas.width + 1, TableEntry);
         this.queue = preAllocArray(canvas.width + canvas.height, ReallocEntry);
@@ -1188,7 +1187,7 @@ xaos.zoom = function(canvas, fractal) {
         var stepy = 0;
         var symy;
         if (((renderMode & MODE_CALCULATE) === 0) && USE_XAOS) {
-            stepy = makeReallocTable(renderedData.reallocY, renderedData.dynamicY, beginy, endy, renderedData.positionY);
+            stepy = makeReallocTable(renderedData.reallocY, renderedData.dynamic, beginy, endy, renderedData.positionY);
         } else {
             stepy = initReallocTableAndPosition(renderedData.reallocY, renderedData.positionY, beginy, endy, true);
         }
@@ -1207,7 +1206,7 @@ xaos.zoom = function(canvas, fractal) {
         var stepx = 0;
         var symx;
         if (((renderMode & MODE_CALCULATE) === 0) && USE_XAOS) {
-            stepx = makeReallocTable(renderedData.reallocX, renderedData.dynamicX, beginx, endx, renderedData.positionX);
+            stepx = makeReallocTable(renderedData.reallocX, renderedData.dynamic, beginx, endx, renderedData.positionX);
         } else {
             stepx = initReallocTableAndPosition(renderedData.reallocX, renderedData.positionX, beginx, endx, false);
         }
