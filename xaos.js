@@ -31,7 +31,8 @@ xaos.zoom = function(canvas, fractal) {
     "use strict";
     var MODE_CALCULATE = 0x01,
         USE_XAOS = true,
-        USE_SYMMETRY = false,
+        USE_SYMMETRY = true,
+        USE_SOLIDGUESS = true,
         RANGES = 2,
         RANGE = 4,
         MASK = 0x7,
@@ -48,7 +49,6 @@ xaos.zoom = function(canvas, fractal) {
     var area = convertArea();
     var isVerticalSymmetrySupported = (USE_SYMMETRY && fractal.symmetry && typeof fractal.symmetry.y === "number") || false;
     var isHorizontalSymmetrySupported = (USE_SYMMETRY && fractal.symmetry && typeof fractal.symmetry.x === "number") || false;
-    var isSolidguessSupported = true;
 
     /** Utility function to pre-allocate an array of the specified size
      * with the specified initial value. It will do the right thing
@@ -323,7 +323,7 @@ xaos.zoom = function(canvas, fractal) {
                 }
                 price = price1 + NEW_PRICE;
                 if ((price < bestPrice) && (p > ps1)) {
-                    bestData = dynamic.conData[((p - 1) << DSIZE) + (i & MASK)];;
+                    bestData = dynamic.conData[((p - 1) << DSIZE) + (i & MASK)];
                     bestPrice = price;
                     bestData.price = price;
                     bestData.pos = -1;
@@ -635,7 +635,7 @@ xaos.zoom = function(canvas, fractal) {
                 to_offset = i;
                 from_offset = reallocX[i].symTo;
                 for (j = 0; j < reallocY.length; j++) {
-                    newRGB[to_offset  ] = newRGB[from_offset];
+                    newRGB[to_offset] = newRGB[from_offset];
                     to_offset += bufferWidth;
                     from_offset += bufferWidth;
                 }
@@ -821,9 +821,6 @@ xaos.zoom = function(canvas, fractal) {
 
     /** Shortcut to prepare and apply filltable */
     function fill() {
-        if (isVerticalSymmetrySupported && isHorizontalSymmetrySupported) {
-            doSymmetry(renderedData.reallocX, renderedData.reallocY);
-        }
         prepareFill(renderedData.fillTable, renderedData.reallocX);
         doFill(renderedData.fillTable, renderedData.reallocY);
     }
@@ -962,7 +959,7 @@ xaos.zoom = function(canvas, fractal) {
         }
         for (j = r + 1; (j < rend) && reallocY[j].dirty; j++) {}
         distd = j - r;
-        if ((!isSolidguessSupported) || (i < 0) || (j >= reallocY.length) || reallocY[i].dirty || reallocY[j].dirty) {
+        if (!USE_SOLIDGUESS || (i < 0) || (j >= reallocY.length) || reallocY[i].dirty || reallocY[j].dirty) {
             for (k = 0, length = reallocX.length; k < length; k++) {
                 current = reallocX[k];
                 if (!reallocX[k].dirty) {
@@ -1060,7 +1057,7 @@ xaos.zoom = function(canvas, fractal) {
         }
         for (j = r + 1; (j < rend) && reallocX[j].dirty; j++) {}
         distr = j - r;
-        if ((!isSolidguessSupported) || (i < 0) || (j >= reallocX.length) || reallocX[i].dirty || reallocX[j].dirty) {
+        if (!USE_SOLIDGUESS || (i < 0) || (j >= reallocX.length) || reallocX[i].dirty || reallocX[j].dirty) {
             for (k = 0, length = reallocY.length; k < length; k++) {
                 current = reallocY[k];
                 if (!reallocY[k].dirty) {
@@ -1133,6 +1130,9 @@ xaos.zoom = function(canvas, fractal) {
                 fill();
                 break;
             }
+        }
+        if (isVerticalSymmetrySupported || isHorizontalSymmetrySupported) {
+            doSymmetry(renderedData.reallocX, renderedData.reallocY);
         }
         copy();
     }
@@ -1235,7 +1235,7 @@ xaos.zoom = function(canvas, fractal) {
         } else if (fps > fractal.minFPS + 10 && renderedData.fudgeFactor > 0) {
             renderedData.fudgeFactor--;
         }
-        //console.log(fps + " fps");
+        console.log(fps + " fps");
     }
 
     /** Adjust display region to zoom based on mouse buttons
