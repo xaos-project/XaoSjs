@@ -1397,3 +1397,9 @@ var fractal = {
 };
 
 xaos.zoom(document.getElementById("canvas"), fractal);
+
+function reset() {
+    document.getElementById("canvas").width+=0;
+    xaos = {};
+    xaos.zoom(document.getElementById("canvas"), fractal);
+}
