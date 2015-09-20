@@ -25,6 +25,10 @@
 			margin: 0 auto;
 			width: 1024px;
 		}
+
+        canvas {
+            cursor: zoom-in;
+        }
     </style>
 </head>
 
@@ -43,7 +47,12 @@
 		</div>
 		<div id="navbar" class="collapse navbar-collapse">
 			<ul class="nav navbar-nav">
-				<li class="active"><a href="index.html">Reset</a></li>
+                <li class="dropdown">
+                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false">Formula <span class="caret"></span></a>
+                    <ul id="formula" class="dropdown-menu">
+                    </ul>
+                </li>
+                <li class="active"><a id="reset" href="#">Reset</a></li>
 				<li><a href="#" data-toggle="modal" data-target="#about">About</a></li>
 				<li><a href="http://github.com/jblang/XaoSjs">GitHub</a></li>
 			</ul>
@@ -52,38 +61,58 @@
 </nav>
 
 <div class="container">
+    
     <div class="container-canvas">
         <canvas id="canvas" width="1024" height="768">
-            <p>Your browser doesn't seem to support the &lt;canvas&gt; tag.
-                Try <a href="http://www.google.com/chrome">Chrome</a> or <a href="http://firefox.com">Firefox</a>.</p>
+            <p>
+                Your browser doesn't seem to support the &lt;canvas&gt; tag.
+                Try <a href="http://www.google.com/chrome">Chrome</a>
+                or <a href="http://firefox.com">Firefox</a>.
+            </p>
         </canvas>
-        <p>This is a real-time fractal zoomer.  Using it is simple: left-click to zoom in, right-click to zoom out.</p>
+        <p>
+            This is a real-time fractal zoomer.  Using it is simple: left-click to zoom in,
+            right-click to zoom out.
+        </p>
     </div>
+
     <div class="modal fade" id="about" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
         <div class="modal-dialog" role="document">
             <div class="modal-content">
                 <div class="modal-header">
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
                     <h4 class="modal-title" id="myModalLabel">About XaoS.js</h4>
                 </div>
                 <div class="modal-body">
-                    <p>Created by <a href="https://www.linkedin.com/in/jblangston">J.B. Langston</a> based on code from <a href="http://xaos.sf.net">XaoS</a> and <a href="http://nextfractal.nextbreakpoint.com/">NextFractal</a>.</p>
-                    <p>Built with <a href="http://getbootstrap.com/">Bootstrap</a> using the Cyborg theme from <a href="http://bootswatch.com/">Bootswatch</a>.</p>
                     <p>
-                    XaoS.js is free software: you can redistribute it and/or modify
-                    it under the terms of the GNU General Public License as published by
-                    the Free Software Foundation, either version 3 of the License, or
-                    (at your option) any later version.
-
-                    XaoS.js is distributed in the hope that it will be useful,
-                    but WITHOUT ANY WARRANTY; without even the implied warranty of
-                    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-                    GNU General Public License for more details.
-
-                    You should have received a copy of the GNU General Public License
-                    along with XaoS.js.  If not, see <a href="http://www.gnu.org/licenses/">http://www.gnu.org/licenses</a>.
+                        Created by <a href="https://www.linkedin.com/in/jblangston">J.B. Langston</a>
+                        based on code from <a href="http://xaos.sf.net">XaoS</a> and
+                        <a href="http://nextfractal.nextbreakpoint.com/">NextFractal</a>.
                     </p>
-                    <p>Visit the project on <a href="http://github.com/jblang/XaoSjs">GitHub</a>!</p>
+                    <p>
+                        Built with <a href="http://getbootstrap.com/">Bootstrap</a> using the Cyborg
+                        theme from <a href="http://bootswatch.com/">Bootswatch</a>.
+                    </p>
+                    <p>
+                        XaoS.js is free software: you can redistribute it and/or modify
+                        it under the terms of the GNU General Public License as published by
+                        the Free Software Foundation, either version 3 of the License, or
+                        (at your option) any later version.
+
+                        XaoS.js is distributed in the hope that it will be useful,
+                        but WITHOUT ANY WARRANTY; without even the implied warranty of
+                        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+                        GNU General Public License for more details.
+
+                        You should have received a copy of the GNU General Public License
+                        along with XaoS.js.  If not, see
+                        <a href="http://www.gnu.org/licenses/">http://www.gnu.org/licenses</a>.
+                    </p>
+                    <p>
+                        Visit the project on <a href="http://github.com/jblang/XaoSjs">GitHub</a>!
+                    </p>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
@@ -91,16 +120,35 @@
             </div>
         </div>
     </div>
+
 </div><!-- /.container -->
 
 
-<!-- Bootstrap core JavaScript
-================================================== -->
-<!-- Placed at the end of the document so the pages load faster -->
+<!-- Bootstrap core JavaScript -->
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
 <script src="js/bootstrap.min.js"></script>
-<!-- IE10 viewport hack for Surface/desktop Windows 8 bug -->
-<script src="js/ie10-viewport-bug-workaround.js"></script>
 <script src="js/xaos.js"></script>
+
+<script>
+    $(document).ready(function() {
+        var i,
+            fractal = xaos.zoom(document.getElementById("canvas"));
+
+        for(i = 0; i < xaos.formulae.length; i++) {
+            $("#formula").append('<li><a id="formula' + i + '" href="#">' + xaos.formulae[i].name + '</a></li>')
+            $("#formula" + i).click(i, function(e) {
+                fractal.setFormula(xaos.formulae[e.data]);
+                fractal.redraw();
+            });
+        }
+
+        $("#reset").click(function() {
+            fractal.resetZoom();
+            fractal.redraw();
+            console.log("redrawn");
+        })
+    });
+</script>
+
 </body>
 </html>

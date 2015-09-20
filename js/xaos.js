@@ -151,9 +151,9 @@ xaos.zoom = (function() {
      * @param fractal {FractalContext} Fractal parameters.
      * @constructor
      */
-    function ZoomContext(image, fractal) {
+    function ZoomContext(image) {
         this.image = image;
-        this.fractal = fractal;
+        this.fractal = new FractalContext(this);
         this.positionX = preAllocArray(canvas.width, 0.0);
         this.positionY = preAllocArray(canvas.height, 0.0);
         this.reallocX = preAllocArray(canvas.width, ReallocEntry);
@@ -939,9 +939,11 @@ xaos.zoom = (function() {
      * @param reallocX
      * @param reallocY
      */
-    function renderLine(realloc, reallocX, reallocY, image) {
-        var buffer = image.newBuffer;
-        var bufferWidth = image.width;
+    ZoomContext.prototype.renderLine = function(realloc) {
+        var reallocX = this.reallocX;
+        var reallocY = this.reallocY;
+        var buffer = this.image.newBuffer;
+        var bufferWidth = this.image.width;
         var position = realloc.position;
         var r = realloc.pos;
         var offset = r * bufferWidth;
@@ -978,7 +980,7 @@ xaos.zoom = (function() {
             for (k = 0, length = reallocX.length; k < length; k++) {
                 current = reallocX[k];
                 if (!reallocX[k].dirty) {
-                    buffer[offset] = fractal.formula(current.position, position);
+                    buffer[offset] = this.fractal.renderPixel(current.position, position);
                 }
                 offset += 1;
             }
@@ -1012,10 +1014,10 @@ xaos.zoom = (function() {
                         if ((n == buffer[offsetu]) && (n == buffer[offsetd]) && (n == buffer[offsetul]) && (n == buffer[offsetur]) && (n == buffer[offsetdl]) && (n == buffer[offsetdr])) {
                             buffer[offset] = n;
                         } else {
-                            buffer[offset] = fractal.formula(current.position, position);
+                            buffer[offset] = this.fractal.renderPixel(current.position, position);
                         }
                     } else {
-                        buffer[offset] = fractal.formula(current.position, position);
+                        buffer[offset] = this.fractal.renderPixel(current.position, position);
                     }
                     distl = 0;
                 }
@@ -1028,7 +1030,7 @@ xaos.zoom = (function() {
         }
         realloc.recalculate = false;
         realloc.dirty = false;
-    }
+    };
 
     /** Render column using solid guessing
      *
@@ -1036,9 +1038,11 @@ xaos.zoom = (function() {
      * @param reallocX
      * @param reallocY
      */
-    function renderColumn(realloc, reallocX, reallocY, image) {
-        var buffer = image.newBuffer;
-        var bufferWidth = image.width;
+    ZoomContext.prototype.renderColumn = function(realloc) {
+        var reallocX = this.reallocX;
+        var reallocY = this.reallocY;
+        var buffer = this.image.newBuffer;
+        var bufferWidth = this.image.width;
         var position = realloc.position;
         var r = realloc.pos;
         var offset = r;
@@ -1077,7 +1081,7 @@ xaos.zoom = (function() {
             for (k = 0, length = reallocY.length; k < length; k++) {
                 current = reallocY[k];
                 if (!reallocY[k].dirty) {
-                    buffer[offset] = fractal.formula(position, current.position);
+                    buffer[offset] = this.fractal.renderPixel(position, current.position);
                 }
                 offset += bufferWidth;
             }
@@ -1113,10 +1117,10 @@ xaos.zoom = (function() {
                         if ((n == buffer[offsetl]) && (n == buffer[offsetr]) && (n == buffer[offsetlu]) && (n == buffer[offsetru]) && (n == buffer[offsetld]) && (n == buffer[offsetrd])) {
                             buffer[offset] = n;
                         } else {
-                            buffer[offset] = fractal.formula(position, current.position);
+                            buffer[offset] = this.fractal.renderPixel(position, current.position);
                         }
                     } else {
-                        buffer[offset] = fractal.formula(position, current.position);
+                        buffer[offset] = this.fractal.renderPixel(position, current.position);
                     }
                     distu = 0;
                 }
@@ -1129,7 +1133,7 @@ xaos.zoom = (function() {
         }
         realloc.recalculate = false;
         realloc.dirty = false;
-    }
+    };
 
     /** Calculate whether we're taking too long to render the fractal to meet the target FPS */
     ZoomContext.prototype.tooSlow = function() {
@@ -1150,9 +1154,9 @@ xaos.zoom = (function() {
             }
             for (i = 0; i < total; i++) {
                 if (this.queue[i].line) {
-                    renderLine(this.queue[i], this.reallocX, this.reallocY, this.image);
+                    this.renderLine(this.queue[i]);
                 } else {
-                    renderColumn(this.queue[i], this.reallocX, this.reallocY, this.image);
+                    this.renderColumn(this.queue[i]);
                 }
                 if (!this.recalculate && this.tooSlow() && (i < total)) {
                     this.incomplete = true;
@@ -1255,21 +1259,58 @@ xaos.zoom = (function() {
         this.zooming = true;
     };
 
+    function FractalContext(zoomer) {
+        this.redraw = function () { zoomer.drawFractal(true) };
+        this.region = {
+            center: { x: -0.75, y: 0.0 },
+            radius: { x: 2.5, y : 2.5 },
+            angle: 0
+        };
+        this.z0 = { x: 0, y: 0 };
+        this.maxiter = 512;
+        this.bailout = 4;
+        this.palette = xaos.makePalette();
+        this.setFormula(xaos.formulae[0]);
+    }
+
+    FractalContext.prototype.resetZoom = function() {
+        this.region.center.x = this.formula.region.center.x;
+        this.region.center.y = this.formula.region.center.y;
+        this.region.radius.x = this.formula.region.radius.x;
+        this.region.radius.y = this.formula.region.radius.y;
+        this.region.angle = this.formula.region.angle;
+    };
+
+    FractalContext.prototype.setFormula = function(formula) {
+        this.formula = formula;
+        this.resetZoom();
+    };
+
+    FractalContext.prototype.renderPixel = function(x, y) {
+        //if (this.julia) {
+            //return this.palette[this.formula.calc(x, y, this.seed.x, this.seed.y, this.maxiter, this.bailout) % this.palette.length];
+        //} else {
+            return this.palette[this.formula.calc(this.z0.x, this.z0.y, x, y, this.maxiter, this.bailout) % this.palette.length];
+        //}
+    };
+
     /** Attaches zoomer to specified canvas */
-    return function(canvas, fractal) {
+    return function(canvas) {
         var image = new CanvasImage(canvas);
-        var zoomer = new ZoomContext(image, fractal);
-        var mouse = { x: 0, y: 0, button: [false, false, false] };
+        var zoomer = new ZoomContext(image);
+        var mouse = {x: 0, y: 0, button: [false, false, false]};
+        var requestID = 0;
 
         function doZoom() {
             zoomer.updateRegion(mouse);
+            zoomer.drawFractal(false);
             if (zoomer.zooming || zoomer.incomplete) {
-                requestAnimationFrame(doZoom);
-                zoomer.drawFractal(false);
+                cancelAnimationFrame(requestID);
+                requestID = requestAnimationFrame(doZoom);
             }
         }
 
-        canvas.onmousedown = function(e) {
+        canvas.onmousedown = function (e) {
             mouse.button[e.button] = true;
             mouse.x = e.offsetX || (e.clientX - canvas.offsetLeft);
             mouse.y = e.offsetY || (e.clientY - canvas.offsetTop);
@@ -1278,25 +1319,27 @@ xaos.zoom = (function() {
             doZoom();
         };
 
-        canvas.onmouseup = function(e) {
+        canvas.onmouseup = function (e) {
             mouse.button[e.button] = false;
         };
 
-        canvas.onmousemove = function(e) {
+        canvas.onmousemove = function (e) {
             mouse.x = e.offsetX || (e.clientX - canvas.offsetLeft);
             mouse.y = e.offsetY || (e.clientY - canvas.offsetTop);
         };
 
-        canvas.oncontextmenu = function() {
+        canvas.oncontextmenu = function () {
             return false;
         };
 
-        canvas.onmouseout = function() {
+        canvas.onmouseout = function () {
             mouse.button = [false, false, false];
         };
 
         zoomer.drawFractal(true);
-    }
+
+        return zoomer.fractal;
+    };
 }());
 
 xaos.makePalette = function() {
@@ -1362,38 +1405,200 @@ xaos.makePalette = function() {
     return new Uint32Array(palette);
 };
 
-var fractal = {
-    symmetry: {x: null, y: 0 },
-    region: {
-        center: { x: -0.75, y: 0.0 },
-        radius: { x: 2.5, y : 2.5 },
-        angle: 0
+xaos.formulae = [
+    {
+        name: 'Mandelbrot',
+        calc:
+            function (zr, zi, cr, ci, maxiter, bailout) {
+                var i = maxiter,
+                    zr2,
+                    zi2;
+
+                while (i--) {
+                    zr2 = zr * zr;
+                    zi2 = zi * zi;
+
+                    if (zr2 + zi2 > bailout) {
+                        return maxiter - i;
+                    }
+
+                    zi = ci + (2 * zr * zi);
+                    zr = cr + zr2 - zi2;
+                }
+
+                return 0;
+            },
+        region: {
+            center: { x: -0.75, y: 0.0 },
+            radius: { x: 2.5, y : 2.5 },
+            angle: 0
+        }
     },
-    z0: { x: 0, y: 0 },
-    maxiter: 512,
-    bailout: 4,
-    formula: function(cr, ci) {
-        var maxiter = this.maxiter,
-            bailout = this.bailout,
-            zr = this.z0.x,
-            zi = this.z0.y,
-            i = maxiter;
+    {
+        name: 'Mandelbrot^3',
+        calc: function (zr, zi, cr, ci, maxiter, bailout) {
+            var i = maxiter,
+                zr2,
+                zi2;
 
-        while (i--) {
-            var zr2 = zr * zr;
-            var zi2 = zi * zi;
+            while (i--) {
+                zr2 = zr * zr;
+                zi2 = zi * zi;
 
-            if (zr2 + zi2 > bailout) {
-                return this.palette[(maxiter - i) % this.palette.length];
+                if (zr2 + zi2 > bailout) {
+                    return maxiter - i;
+                }
+
+                zi = zi * (3 * zr2 - zi2) + ci;
+                zr = zr * (zr2 - 3 * zi2) + cr;
             }
 
-            zi = ci + (2 * zr * zi);
-            zr = cr + zr2 - zi2;
+            return 0;
+        },
+        region: {
+            center: { x: 0.0, y: 0.0 },
+            radius: { x: 2.5, y : 2.5 },
+            angle: 0
+        }
+    },
+    {
+        name: 'Burning Ship',
+        calc: function (zr, zi, cr, ci, maxiter, bailout) {
+            var i = maxiter,
+                zr2,
+                zi2;
+
+            while (i--) {
+                zr2 = zr * zr;
+                zi2 = zi * zi;
+
+                if (zr2 + zi2 > bailout) {
+                    return maxiter - i;
+                }
+
+                zi = 2 * Math.abs(zr * zi) + ci;
+                zr = zr2 - zi2 - cr;
+            }
+
+            return 0;
+        },
+        region: {
+            center: { x: 0.5, y: -0.75 },
+            radius: { x: 2.5, y : 2.5 },
+            angle: 0
+        }
+    },
+    {
+        name: 'Tricorn',
+        calc: function (zr, zi, cr, ci, maxiter, bailout) {
+            var i = maxiter,
+                zr2,
+                zi2;
+
+            while (i--) {
+                zr2 = zr * zr;
+                zi2 = zi * zi;
+
+                if (zr2 + zi2 > bailout) {
+                    return maxiter - i;
+                }
+
+                zi = (zr + zr) * -zi + ci;
+                zr = zr2 - zi2 - cr;
+            }
+
+            return 0;
+        },
+        region: {
+            center: { x: -0.75, y: 0.0 },
+            radius: { x: 2.5, y : 2.5 },
+            angle: 0
+        }
+    },
+    {
+        name: 'Manowar',
+        calc: function (zr, zi, cr, ci, maxiter, bailout) {
+            var i = maxiter,
+                zrp = zr,
+                zip = zi,
+                zrt = 0,
+                zit = 0,
+                zr2,
+                zi2;
+
+            while (i--) {
+                zr2 = zr * zr;
+                zi2 = zi * zi;
+
+                if (zr2 + zi2 > bailout) {
+                    return maxiter - i;
+                }
+
+                zrt = zr;
+                zit = zi;
+                zi = (zi * zr) * 2 + ci + zip;
+                zr = zr2 - zi2 + cr + zrp;
+                zrp = zrt;
+                zip = zit;
+            }
+
+            return 0;
+        },
+        region: {
+            center: { x: -0.75, y: 0.0 },
+            radius: { x: 2.5, y : 2.5 },
+            angle: 0
+        }
+    },
+    {
+        name: 'Spider',
+        calc: function (zr, zi, cr, ci, maxiter, bailout) {
+            var i = maxiter,
+                zr2,
+                zi2;
+
+            while (i--) {
+                zr2 = zr * zr;
+                zi2 = zi * zi;
+
+                if (zr2 + zi2 > bailout) {
+                    return maxiter - i;
+                }
+
+                zi = (zi * zr) * 2 + ci;
+                zr = zr2 - zi2 + cr;
+                cr = cr / 2 + zr;
+                ci = ci / 2 + zi;
+            }
+
+            return 0;
+        },
+        region: {
+            center: { x: -0.75, y: 0.0 },
+            radius: { x: 2.5, y : 2.5 },
+            angle: 0
+        }
+    }
+];
+
+    /*
+    'Custom': function(cx, cy) {
+        var i = this.maxiter,
+            bailout = this.bailout,
+            z = Complex(this.z0.x, this.z0.y),
+            c = Complex(cx, cy),
+            func = this.func;
+
+        while (i--) {
+            z = func(z, c);
+            if (z.mag() > 2) {
+                return this.maxiter - i;
+            }
         }
 
-        return this.palette[0];
-    },
-    palette: xaos.makePalette()
-};
+        return 0;
+    }
+    */
 
-xaos.zoom(document.getElementById("canvas"), fractal);
+
+
