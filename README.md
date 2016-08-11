@@ -1,6 +1,6 @@
 # Try It
 
-[Try](http://jblang.github.io/XaoSjs) the live demo!
+[Try](http://jblang.github.io/XaoSjs) the live demo!  Using XaoSjs is simple. Left click to zoom in; right click to zoom out.  Works best in Chrome, acceptably in Firefox, and I make no guarantees about anything else.
 
 # About
 
