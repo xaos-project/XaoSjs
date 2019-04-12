@@ -37,9 +37,9 @@ xaos.zoom = (function() {
         MASK = 0x7,
         DSIZE = (RANGES + 1),
         FPMUL = 64,
-        FPRANGE = FPMUL * RANGE,
+        IRANGE = FPMUL * RANGE,
         MAX_PRICE = Number.MAX_VALUE,
-        NEW_PRICE = FPRANGE * FPRANGE,
+        NEW_PRICE = IRANGE * IRANGE,
         GUESS_RANGE = 4;
 
     /** Utility function to pre-allocate an array of the specified size
@@ -51,7 +51,7 @@ xaos.zoom = (function() {
      */
     function preAllocArray(size, initial) {
         var i, data = [];
-        for (i = 0; i < size; i += 1) {
+        for (i = 0; i < size; i++) {
             if (typeof initial === "object") {
                 // prototype object
                 data[i] = Object.create(initial);
@@ -66,6 +66,121 @@ xaos.zoom = (function() {
         return data;
     }
 
+    /** Optimized array copy using Duff's Device.
+     *
+     * @param from {Array} source array
+     * @param fromOffset {number} offset into source array
+     * @param to {Array} target array
+     * @param toOffset {number} offset into target array
+     * @param length {number} elements to copy
+     */
+    function arrayCopy(from, fromOffset, to, toOffset, length) {
+        var n = length % 8;
+        while (n--) {
+            to[toOffset++] = from[fromOffset++];
+        }
+        n = (length / 8) | 0;
+        while (n--) {
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+        }
+    }
+
+    /** Calculate price of approximation
+     *
+     * @param p1
+     * @param p2
+     * @returns {number}
+     */
+    function calcPrice(p1, p2) {
+        return (p1 - p2) * (p1 - p2);
+    }
+
+    /** Add prices together to determine priority
+     *
+     * @param vector
+     * @param r1
+     * @param r2
+     */
+    function addPrices(vector, r1, r2) {
+        var r3;
+        while (r1 < r2) {
+            r3 = r1 + ((r2 - r1) >> 1);
+            vector[r3].priority = (vector[r2].position - vector[r3].position) * vector[r3].priority;
+            if (vector[r3].symRef !== -1) {
+                vector[r3].priority /= 2.0;
+            }
+            addPrices(vector, r1, r3);
+            r1 = r3 + 1;
+        }
+    }
+
+    /** Initialize prices from relocation table
+     *
+     * @param queue
+     * @param total
+     * @param vector
+     * @returns {*}
+     */
+    function initPrices(queue, total, vector) {
+        var i;
+        var j = 0;
+        for (i = 0; i < vector.length; i++) {
+            if (vector[i].recalculate) {
+                for (j = i; (j < vector.length) && vector[j].recalculate; j++) {
+                    queue[total++] = vector[j];
+                }
+                if (j === vector.length) {
+                    j -= 1;
+                }
+                addPrices(vector, i, j);
+                i = j;
+            }
+        }
+        return total;
+    }
+
+    /** Standard quicksort alogrithm to sort queue according to priority
+     *
+     * @param queue
+     * @param l
+     * @param r
+     */
+    function sortQueue(queue, l, r) {
+        var m = (queue[l].priority + queue[r].priority) / 2.0;
+        var tmp = null;
+        var i = l;
+        var j = r;
+        do {
+            while (queue[i].priority > m) {
+                i++;
+            }
+            while (queue[j].priority < m) {
+                j--;
+            }
+            if (i <= j) {
+                tmp = queue[i];
+                queue[i] = queue[j];
+                queue[j] = tmp;
+                i++;
+                j--;
+            }
+        }
+        while (j >= i);
+        if (l < j) {
+            sortQueue(queue, l, j);
+        }
+        if (r > i) {
+            sortQueue(queue, i, r);
+        }
+    }
+
     /** Creates a single entry for a move or fill table.
      * @constructor
      */
@@ -75,19 +190,19 @@ xaos.zoom = (function() {
         this.to = 0;
     }
 
-    /** Creates a single entry for a dynamic data table.
+    /** Creates a single entry for a this data table.
      * @constructor
      */
     function DynamicEntry() {
         this.previous = null;
         this.pos = 0;
-        this.price = 0;
+        this.price = MAX_PRICE;
     }
 
-    /** Creates a single entry for a reallocation table.
+    /** Creates a single entry for a relocation table.
      * @constructor
      */
-    function ReallocEntry() {
+    function Vector() {
         this.recalculate = false;
         this.dirty = false;
         this.line = false;
@@ -95,29 +210,10 @@ xaos.zoom = (function() {
         this.plus = 0;
         this.symTo = 0;
         this.symRef = 0;
+        this.lastPosition = 0.0;
         this.position = 0.0;
         this.priority = 0.0;
     }
-
-    /** Container for dynamic algorithm data.
-     * @param {number} size - the number of entries to allocate.
-     * @constructor
-     */
-    function DynamicContainer(size) {
-        this.delta = preAllocArray(size + 1, 0);
-        this.oldBest = preAllocArray(size, DynamicEntry);
-        this.newBest = preAllocArray(size, DynamicEntry);
-        this.calData = preAllocArray(size, DynamicEntry);
-        this.conData = preAllocArray(size << DSIZE, DynamicEntry);
-    }
-
-
-    /** Swaps the old and new best prices in the dynamic container. */
-    DynamicContainer.prototype.swap = function() {
-        var tmpBest = this.oldBest;
-        this.oldBest = this.newBest;
-        this.newBest = tmpBest;
-    };
 
     function CanvasImage(canvas) {
         this.canvas = canvas;
@@ -152,13 +248,16 @@ xaos.zoom = (function() {
      * @constructor
      */
     function ZoomContext(image, fractal) {
+        var size = Math.max(canvas.width, canvas.height);
         this.image = image;
         this.fractal = fractal;
-        this.positionX = preAllocArray(canvas.width, 0.0);
-        this.positionY = preAllocArray(canvas.height, 0.0);
-        this.reallocX = preAllocArray(canvas.width, ReallocEntry);
-        this.reallocY = preAllocArray(canvas.height, ReallocEntry);
-        this.dynamic = new DynamicContainer(Math.max(canvas.width, canvas.height));
+        this.columns = preAllocArray(canvas.width, Vector);
+        this.rows = preAllocArray(canvas.height, Vector);
+        this.delta = preAllocArray(size + 1, 0);
+        this.oldBest = preAllocArray(size, DynamicEntry);
+        this.newBest = preAllocArray(size, DynamicEntry);
+        this.calData = preAllocArray(size, DynamicEntry);
+        this.conData = preAllocArray(size << DSIZE, DynamicEntry);
         this.moveTable = preAllocArray(canvas.width + 1, TableEntry);
         this.fillTable = preAllocArray(canvas.width + 1, TableEntry);
         this.queue = preAllocArray(canvas.width + canvas.height, null);
@@ -169,31 +268,12 @@ xaos.zoom = (function() {
         this.zooming = false;
     }
 
-    /** Optimized array copy using Duff's Device.
-     *
-     * @param from {Array} source array
-     * @param fromOffset {number} offset into source array
-     * @param to {Array} target array
-     * @param toOffset {number} offset into target array
-     * @param length {number} elements to copy
-     */
-    function arrayCopy(from, fromOffset, to, toOffset, length) {
-        var n = length % 8;
-        while (n--) {
-            to[toOffset++] = from[fromOffset++];
-        }
-        n = (length / 8) | 0;
-        while (n--) {
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-        }
-    }
+    /** Swaps the old and new best prices in the this container. */
+    ZoomContext.prototype.swapBest = function() {
+        var tmpBest = this.oldBest;
+        this.oldBest = this.newBest;
+        this.newBest = tmpBest;
+    };
 
     /** Convert fractal viewport from radius and center to x and y start to end ranges */
     ZoomContext.prototype.convertArea = function() {
@@ -213,47 +293,43 @@ xaos.zoom = (function() {
         };
     };
 
-    /** Resets reallocation table for fresh calculation
+    /** Resets relocation table for fresh calculation
      *
-     * @param realloc - reallocation table
+     * @param vector - relocation table
      * @param position - array of coordinates for line or column in the complex plane
      * @param begin - starting cooridnate
      * @param end - ending coordinate
      * @param line - whether this is a line or column
      * @returns {number}
      */
-    function initReallocTable(realloc, position, begin, end, line) {
-        var i, p, step = (end - begin) / realloc.length;
-        for (i = 0, p = begin; i < realloc.length; i++, p += step) {
-            position[i] = p;
-            realloc[i].recalculate = true;
-            realloc[i].dirty = true;
-            realloc[i].line = line;
-            realloc[i].pos = i;
-            realloc[i].position = p;
-            realloc[i].plus = i;
-            realloc[i].symTo = -1;
-            realloc[i].symRef = -1;
+    ZoomContext.prototype.initVector = function(vector, begin, end, line) {
+        var i, p, step = (end - begin) / vector.length;
+        for (i = 0, p = begin; i < vector.length; i++, p += step) {
+            vector[i].recalculate = true;
+            vector[i].dirty = true;
+            vector[i].line = line;
+            vector[i].pos = i;
+            vector[i].lastPosition = p;
+            vector[i].position = p;
+            vector[i].plus = i;
+            vector[i].symTo = -1;
+            vector[i].symRef = -1;
         }
         return step;
     }
 
     /** Calculate the best approximation for points based on previous frame
      *
-     * @param realloc - reallocation table for rows or columns
-     * @param dynamic - temporary data for dynamic algorithm
+     * @param vector - relocation table for rows or columns
      * @param begin - beginning coordinate (x or y)
      * @param end - ending coordinate (x or y)
      * @param position - array of position coordinates on the complex plane
      * @returns {number}
      */
-    function updateReallocTable(realloc, dynamic, begin, end, position) {
-        var tmpRealloc = null;
-        var prevData = null;
-        var bestData = null;
-        var bestPrice = MAX_PRICE;
+    ZoomContext.prototype.updateVector = function(vector, begin, end) {
+        var previous = null;
+        var best = null;
         var price = 0;
-        var price1 = 0;
         var i;
         var y = 0;
         var p = 0;
@@ -262,157 +338,146 @@ xaos.zoom = (function() {
         var ps1 = 0;
         var yend = 0;
         var flag = 0;
-        var size = realloc.length;
+        var size = vector.length;
         var step = (end - begin) / size;
         var tofix = (size * FPMUL) / (end - begin);
-        var delta = dynamic.delta;
+        var delta = this.delta;
 
         delta[size] = Number.MAX_VALUE;
         for (i = size - 1; i >= 0; i--) {
-            delta[i] = ((position[i] - begin) * tofix)|0;
+            delta[i] = ((vector[i].lastPosition - begin) * tofix) | 0;
             if (delta[i] > delta[i + 1]) {
                 delta[i] = delta[i + 1];
             }
         }
 
         for (i = 0; i < size; i++) {
-            dynamic.swap();
-            yend = y - FPRANGE;
+            this.swapBest();
+            yend = y - IRANGE;
             if (yend < 0) {
                 yend = 0;
             }
             p = ps;
             while (delta[p] < yend) {
-                p += 1;
+                p++;
             }
             ps1 = p;
-            yend = y + FPRANGE;
+            yend = y + IRANGE;
+
             if ((ps !== pe) && (p > ps)) {
                 if (p < pe) {
-                    prevData = dynamic.oldBest[p - 1];
+                    previous = this.oldBest[p - 1];
                 } else {
-                    prevData = dynamic.oldBest[pe - 1];
+                    previous = this.oldBest[pe - 1];
                 }
-                price1 = prevData.price;
+                price = previous.price;
             } else if (i > 0) {
-                prevData = dynamic.calData[i - 1];
-                price1 = prevData.price;
+                previous = this.calData[i - 1];
+                price = previous.price;
             } else {
-                prevData = null;
-                price1 = 0;
+                previous = null;
+                price = 0;
             }
 
-            price = price1 + NEW_PRICE;
-            bestData = dynamic.calData[i];
-            bestPrice = price;
-            bestData.price = price;
-            bestData.pos = -1;
-            bestData.previous = prevData;
+            price += NEW_PRICE;
+            best = this.calData[i];
+            best.price = price;
+            best.pos = -1;
+            best.previous = previous;
 
             if (ps !== pe) {
                 if (p === ps) {
                     if (delta[p] !== delta[p + 1]) {
-                        prevData = dynamic.calData[i - 1];
-                        price1 = prevData.price;
-                        price = price1 + calcPrice(delta[p], y);
-                        if (price < bestPrice) {
-                            bestData = dynamic.conData[(p << DSIZE) + (i & MASK)];
-                            bestPrice = price;
-                            bestData.price = price;
-                            bestData.pos = p;
-                            bestData.previous = prevData;
+                        previous = this.calData[i - 1];
+                        price = previous.price + calcPrice(delta[p], y);
+                        if (price < best.price) {
+                            best = this.conData[(p << DSIZE) + (i & MASK)];
+                            best.price = price;
+                            best.pos = p;
+                            best.previous = previous;
                         }
                     }
-                    dynamic.newBest[p++] = bestData;
+                    this.newBest[p++] = best;
                 }
-                prevData = null;
-                price1 = price;
+                previous = null;
                 while (p < pe) {
                     if (delta[p] !== delta[p + 1]) {
-                        prevData = dynamic.oldBest[p - 1];
-                        price1 = prevData.price;
-                        price = price1 + NEW_PRICE;
-                        if (price < bestPrice) {
-                            bestData = dynamic.conData[((p - 1) << DSIZE) + (i & MASK)];
-                            bestPrice = price;
-                            bestData.price = price;
-                            bestData.pos = -1;
-                            bestData.previous = prevData;
-                            dynamic.newBest[p - 1] = bestData;
+                        previous = this.oldBest[p - 1];
+                        price = previous.price + NEW_PRICE;
+                        if (price < best.price) {
+                            best = this.conData[((p - 1) << DSIZE) + (i & MASK)];
+                            best.price = price;
+                            best.pos = -1;
+                            best.previous = previous;
+                            this.newBest[p - 1] = best;
                         }
-                        price = price1 + calcPrice(delta[p], y);
-                        if (price < bestPrice) {
-                            bestData = dynamic.conData[(p << DSIZE) + (i & MASK)];
-                            bestPrice = price;
-                            bestData.price = price;
-                            bestData.pos = p;
-                            bestData.previous = prevData;
+                        price = previous.price + calcPrice(delta[p], y);
+                        if (price < best.price) {
+                            best = this.conData[(p << DSIZE) + (i & MASK)];
+                            best.price = price;
+                            best.pos = p;
+                            best.previous = previous;
                         } else if (delta[p] > y) {
-                            dynamic.newBest[p++] = bestData;
+                            this.newBest[p++] = best;
                             break;
                         }
                     }
-                    dynamic.newBest[p++] = bestData;
+                    this.newBest[p++] = best;
                 }
                 if (p > ps) {
-                    prevData = dynamic.oldBest[p - 1];
-                    price1 = prevData.price;
+                    previous = this.oldBest[p - 1];
                 } else {
-                    prevData = dynamic.calData[i - 1];
-                    price1 = prevData.price;
+                    previous = this.calData[i - 1];
                 }
-                price = price1 + NEW_PRICE;
-                if ((price < bestPrice) && (p > ps1)) {
-                    bestData = dynamic.conData[((p - 1) << DSIZE) + (i & MASK)];
-                    bestPrice = price;
-                    bestData.price = price;
-                    bestData.pos = -1;
-                    bestData.previous = prevData;
-                    dynamic.newBest[p - 1] = bestData;
+                price = previous.price + NEW_PRICE;
+                if ((price < best.price) && (p > ps1)) {
+                    best = this.conData[((p - 1) << DSIZE) + (i & MASK)];
+                    best.price = price;
+                    best.pos = -1;
+                    best.previous = previous;
+                    this.newBest[p - 1] = best;
                 }
                 while (delta[p] < yend) {
                     if (delta[p] !== delta[p + 1]) {
-                        price = price1 + calcPrice(delta[p], y);
-                        if (price < bestPrice) {
-                            bestData = dynamic.conData[(p << DSIZE) + (i & MASK)];
-                            bestPrice = price;
-                            bestData.price = price;
-                            bestData.pos = p;
-                            bestData.previous = prevData;
+                        price = previous.price + calcPrice(delta[p], y);
+                        if (price < best.price) {
+                            best = this.conData[(p << DSIZE) + (i & MASK)];
+                            best.price = price;
+                            best.pos = p;
+                            best.previous = previous;
                         } else if (delta[p] > y) {
                             break;
                         }
                     }
-                    dynamic.newBest[p++] = bestData;
+                    this.newBest[p++] = best;
                 }
                 while (delta[p] < yend) {
-                    dynamic.newBest[p++] = bestData;
+                    this.newBest[p++] = best;
                 }
             } else if (delta[p] < yend) {
                 if (i > 0) {
-                    prevData = dynamic.calData[i - 1];
-                    price1 = prevData.price;
+                    previous = this.calData[i - 1];
+                    price = previous.price;
                 } else {
-                    prevData = null;
-                    price1 = 0;
+                    previous = null;
+                    price = 0;
                 }
                 while (delta[p] < yend) {
                     if (delta[p] !== delta[p + 1]) {
-                        price = price1 + calcPrice(delta[p], y);
-                        if (price < bestPrice) {
-                            bestData = dynamic.conData[(p << DSIZE) + (i & MASK)];
-                            bestPrice = price;
-                            bestData.price = price;
-                            bestData.pos = p;
-                            bestData.previous = prevData;
+                        price += calcPrice(delta[p], y);
+                        if (price < best.price) {
+                            best = this.conData[(p << DSIZE) + (i & MASK)];
+                            best.price = price;
+                            best.pos = p;
+                            best.previous = previous;
                         } else if (delta[p] > y) {
                             break;
                         }
                     }
-                    dynamic.newBest[p++] = bestData;
+                    this.newBest[p++] = best;
                 }
                 while (delta[p] < yend) {
-                    dynamic.newBest[p++] = bestData;
+                    this.newBest[p++] = best;
                 }
 
             }
@@ -428,28 +493,27 @@ xaos.zoom = (function() {
             flag = 2;
         }
         for (i = size - 1; i >= 0; i--) {
-            tmpRealloc = realloc[i];
-            tmpRealloc.symTo = -1;
-            tmpRealloc.symRef = -1;
-            if (bestData.pos < 0) {
-                tmpRealloc.recalculate = true;
-                tmpRealloc.dirty = true;
-                tmpRealloc.plus = tmpRealloc.pos;
+            vector[i].symTo = -1;
+            vector[i].symRef = -1;
+            if (best.pos < 0) {
+                vector[i].recalculate = true;
+                vector[i].dirty = true;
+                vector[i].plus = vector[i].pos;
             } else {
-                tmpRealloc.plus = bestData.pos;
-                tmpRealloc.position = position[bestData.pos];
-                tmpRealloc.recalculate = false;
-                tmpRealloc.dirty = false;
+                vector[i].plus = best.pos;
+                vector[i].position = vector[best.pos].lastPosition;
+                vector[i].recalculate = false;
+                vector[i].dirty = false;
             }
-            bestData = bestData.previous;
+            best = best.previous;
         }
-        newPositions(realloc, size, begin, end, step, position, flag);
+        newPositions(vector, begin, end, step, flag);
         return step;
     }
 
-    /** Calculate new positions based on reallocation table
+    /** Calculate new positions based on relocation table
      *
-     * @param realloc
+     * @param vector
      * @param size
      * @param begin1
      * @param end1
@@ -457,9 +521,9 @@ xaos.zoom = (function() {
      * @param position
      * @param flag
      */
-    function newPositions(realloc, size, begin1, end1, step, position, flag) {
-        var tmpRealloc = null;
+    function newPositions(vector, begin1, end1, step, flag) {
         var delta = 0;
+        var size = vector.length;
         var begin = 0;
         var end = 0;
         var s = -1;
@@ -469,22 +533,22 @@ xaos.zoom = (function() {
         }
         while (s < (size - 1)) {
             e = s + 1;
-            if (realloc[e].recalculate) {
+            if (vector[e].recalculate) {
                 while (e < size) {
-                    if (!realloc[e].recalculate) {
+                    if (!vector[e].recalculate) {
                         break;
                     }
                     e++;
                 }
                 if (e < size) {
-                    end = realloc[e].position;
+                    end = vector[e].position;
                 } else {
                     end = end1;
                 }
                 if (s < 0) {
                     begin = begin1;
                 } else {
-                    begin = realloc[s].position;
+                    begin = vector[s].position;
                 }
                 if ((e === size) && (begin > end)) {
                     end = begin;
@@ -498,25 +562,22 @@ xaos.zoom = (function() {
                     case 1:
                         for (s++; s < e; s++) {
                             begin += delta;
-                            tmpRealloc = realloc[s];
-                            tmpRealloc.position = begin;
-                            tmpRealloc.priority = 1 / (1 + (Math.abs((position[s] - begin)) * step));
+                            vector[s].position = begin;
+                            vector[s].priority = 1 / (1 + (Math.abs((vector[s].lastPosition - begin)) * step));
                         }
                         break;
                     case 2:
                         for (s++; s < e; s++) {
                             begin += delta;
-                            tmpRealloc = realloc[s];
-                            tmpRealloc.position = begin;
-                            tmpRealloc.priority = Math.abs((position[s] - begin)) * step;
+                            vector[s].position = begin;
+                            vector[s].priority = Math.abs((vector[s].lastPosition - begin)) * step;
                         }
                         break;
                     default:
                         for (s++; s < e; s++) {
                             begin += delta;
-                            tmpRealloc = realloc[s];
-                            tmpRealloc.position = begin;
-                            tmpRealloc.priority = 1.0;
+                            vector[s].position = begin;
+                            vector[s].priority = 1.0;
                         }
                         break;
                 }
@@ -525,25 +586,24 @@ xaos.zoom = (function() {
         }
     }
 
-    /** Populate symmetry data into reallocation table
+    /** Populate symmetry data into relocation table
      *
-     * @param realloc
+     * @param vector
      * @param symi
      * @param symPosition
      * @param step
      */
-    function prepareSymmetry(realloc, symi, symPosition, step) {
+    ZoomContext.prototype.prepareSymmetry = function(vector, symi, symPosition, step) {
         var i;
         var j = 0;
         var tmp;
         var abs;
         var distance;
-        var tmpPosition;
-        var size = realloc.length;
+        var position;
+        var size = vector.length;
         var max = size - RANGE - 1;
         var min = RANGE;
         var istart = 0;
-        var tmpRealloc = null;
         var symRealloc = null;
         var symj = (2 * symi) - size;
         symPosition *= 2;
@@ -552,154 +612,140 @@ xaos.zoom = (function() {
         }
         distance = step * RANGE;
         for (i = symj; i < symi; i++) {
-            if (realloc[i].symTo !== -1) {
+            if (vector[i].symTo !== -1) {
                 continue;
             }
-            tmpRealloc = realloc[i];
-            tmpPosition = tmpRealloc.position;
-            tmpRealloc.symTo = (2 * symi) - i;
-            if (tmpRealloc.symTo > max) {
-                tmpRealloc.symTo = max;
+            position = vector[i].position;
+            vector[i].symTo = (2 * symi) - i;
+            if (vector[i].symTo > max) {
+                vector[i].symTo = max;
             }
-            j = ((tmpRealloc.symTo - istart) > RANGE) ? (-RANGE) : (-tmpRealloc.symTo + istart);
-            if (tmpRealloc.recalculate) {
-                while ((j < RANGE) && ((tmpRealloc.symTo + j) < (size - 1))) {
-                    tmp = symPosition - realloc[tmpRealloc.symTo + j].position;
-                    abs = Math.abs(tmp - tmpPosition);
+            j = ((vector[i].symTo - istart) > RANGE) ? (-RANGE) : (-vector[i].symTo + istart);
+            if (vector[i].recalculate) {
+                while ((j < RANGE) && ((vector[i].symTo + j) < (size - 1))) {
+                    tmp = symPosition - vector[vector[i].symTo + j].position;
+                    abs = Math.abs(tmp - position);
                     if (abs < distance) {
-                        if (((i === 0) || (tmp > realloc[i - 1].position)) && (tmp < realloc[i + 1].position)) {
+                        if (((i === 0) || (tmp > vector[i - 1].position)) && (tmp < vector[i + 1].position)) {
                             distance = abs;
                             min = j;
                         }
-                    } else if (tmp < tmpPosition) {
+                    } else if (tmp < position) {
                         break;
                     }
-                    j += 1;
+                    j++;
                 }
             } else {
-                while ((j < RANGE) && ((tmpRealloc.symTo + j) < (size - 1))) {
-                    if (tmpRealloc.recalculate) {
-                        tmp = symPosition - realloc[tmpRealloc.symTo + j].position;
-                        abs = Math.abs(tmp - tmpPosition);
+                while ((j < RANGE) && ((vector[i].symTo + j) < (size - 1))) {
+                    if (vector[i].recalculate) {
+                        tmp = symPosition - vector[vector[i].symTo + j].position;
+                        abs = Math.abs(tmp - position);
                         if (abs < distance) {
-                            if (((i === 0) || (tmp > realloc[i - 1].position)) && (tmp < realloc[i + 1].position)) {
+                            if (((i === 0) || (tmp > vector[i - 1].position)) && (tmp < vector[i + 1].position)) {
                                 distance = abs;
                                 min = j;
                             }
-                        } else if (tmp < tmpPosition) {
+                        } else if (tmp < position) {
                             break;
                         }
                     }
-                    j += 1;
+                    j++;
                 }
             }
-            tmpRealloc.symTo += min;
-            symRealloc = realloc[tmpRealloc.symTo];
-            if ((min === RANGE) || (tmpRealloc.symTo <= symi) || (symRealloc.symTo !== -1) || (symRealloc.symRef !== -1)) {
-                tmpRealloc.symTo = -1;
+            vector[i].symTo += min;
+            symRealloc = vector[vector[i].symTo];
+            if ((min === RANGE) || (vector[i].symTo <= symi) || (symRealloc.symTo !== -1) || (symRealloc.symRef !== -1)) {
+                vector[i].symTo = -1;
                 continue;
             }
-            if (!tmpRealloc.recalculate) {
-                tmpRealloc.symTo = -1;
+            if (!vector[i].recalculate) {
+                vector[i].symTo = -1;
                 if ((symRealloc.symTo !== -1) || !symRealloc.recalculate) {
                     continue;
                 }
-                symRealloc.plus = tmpRealloc.plus;
+                symRealloc.plus = vector[i].plus;
                 symRealloc.symTo = i;
-                istart = tmpRealloc.symTo - 1;
+                istart = vector[i].symTo - 1;
                 symRealloc.recalculate = false;
                 symRealloc.dirty = true;
-                tmpRealloc.symRef = tmpRealloc.symTo;
-                symRealloc.position = symPosition - tmpRealloc.position;
+                vector[i].symRef = vector[i].symTo;
+                symRealloc.position = symPosition - vector[i].position;
             } else {
                 if (symRealloc.symTo !== -1) {
-                    tmpRealloc.symTo = -1;
+                    vector[i].symTo = -1;
                     continue;
                 }
-                tmpRealloc.plus = symRealloc.plus;
-                istart = tmpRealloc.symTo - 1;
-                tmpRealloc.recalculate = false;
-                tmpRealloc.dirty = true;
+                vector[i].plus = symRealloc.plus;
+                istart = vector[i].symTo - 1;
+                vector[i].recalculate = false;
+                vector[i].dirty = true;
                 symRealloc.symRef = i;
-                tmpRealloc.position = symPosition - symRealloc.position;
+                vector[i].position = symPosition - symRealloc.position;
             }
         }
     }
 
-    /** Apply previously calculated symmetry to image
-     *
-     * @param reallocX
-     * @param reallocY
-     * @param image
-     */
-    function doSymmetry(reallocX, reallocY, image) {
+    /** Apply previously calculated symmetry to image */
+    ZoomContext.prototype.doSymmetry = function() {
         var from_offset = 0;
         var to_offset = 0;
         var i;
         var j = 0;
-        var buffer = image.newBuffer;
-        var bufferWidth = image.width;
-        for (i = 0; i < reallocY.length; i++) {
-            if ((reallocY[i].symTo >= 0) && (!reallocY[reallocY[i].symTo].dirty)) {
-                from_offset = reallocY[i].symTo * bufferWidth;
+        var buffer = this.image.newBuffer;
+        var bufferWidth = this.image.width;
+        for (i = 0; i < this.rows.length; i++) {
+            if ((this.rows[i].symTo >= 0) && (!this.rows[this.rows[i].symTo].dirty)) {
+                from_offset = this.rows[i].symTo * bufferWidth;
                 arrayCopy(buffer, from_offset, buffer, to_offset, bufferWidth);
-                reallocY[i].dirty = false;
+                this.rows[i].dirty = false;
             }
             to_offset += bufferWidth;
         }
-        for (i = 0; i < reallocX.length; i++) {
-            if ((reallocX[i].symTo >= 0) && (!reallocX[reallocX[i].symTo].dirty)) {
+        for (i = 0; i < this.columns.length; i++) {
+            if ((this.columns[i].symTo >= 0) && (!this.columns[this.columns[i].symTo].dirty)) {
                 to_offset = i;
-                from_offset = reallocX[i].symTo;
-                for (j = 0; j < reallocY.length; j++) {
+                from_offset = this.columns[i].symTo;
+                for (j = 0; j < this.rows.length; j++) {
                     buffer[to_offset] = buffer[from_offset];
                     to_offset += bufferWidth;
                     from_offset += bufferWidth;
                 }
-                reallocX[i].dirty = false;
+                this.columns[i].dirty = false;
             }
         }
     }
 
-    /** Build an optimized move table based on reallocation table
-     *
-     * @param movetable
-     * @param reallocX
-     */
-    function prepareMove(movetable, reallocX) {
-        var tmpData = null;
+    /** Build an optimized move table based on relocation table */
+    ZoomContext.prototype.prepareMove = function() {
+        var tmp = null;
         var i = 0;
         var j = 0;
         var s = 0;
-        while (i < reallocX.length) {
-            if (!reallocX[i].dirty) {
-                tmpData = movetable[s];
-                tmpData.to = i;
-                tmpData.length = 1;
-                tmpData.from = reallocX[i].plus;
-                for (j = i + 1; j < reallocX.length; j++) {
-                    if (reallocX[j].dirty || ((j - reallocX[j].plus) !== (tmpData.to - tmpData.from))) {
+        while (i < this.columns.length) {
+            if (!this.columns[i].dirty) {
+                tmp = this.moveTable[s];
+                tmp.to = i;
+                tmp.length = 1;
+                tmp.from = this.columns[i].plus;
+                for (j = i + 1; j < this.columns.length; j++) {
+                    if (this.columns[j].dirty || ((j - this.columns[j].plus) !== (tmp.to - tmp.from))) {
                         break;
                     }
-                    tmpData.length += 1;
+                    tmp.length++;
                 }
                 i = j;
-                s += 1;
+                s++;
             } else {
-                i += 1;
+                i++;
             }
         }
-        tmpData = movetable[s];
-        tmpData.length = 0;
+        tmp = this.moveTable[s];
+        tmp.length = 0;
     }
 
-    /** Execute moves defined in movetable
-     *
-     * @param movetable
-     * @param reallocY
-     */
-    function doMove(movetable, reallocY, image) {
-        var tmpData = null;
+    /** Execute moves defined in move table */
+    ZoomContext.prototype.doMove = function() {
+        var tmp = null;
         var new_offset = 0;
         var old_offset = 0;
         var from = 0;
@@ -707,19 +753,19 @@ xaos.zoom = (function() {
         var i;
         var s = 0;
         var length = 0;
-        var newBuffer = image.newBuffer;
-        var oldBuffer = image.oldBuffer;
-        var bufferWidth = image.width;
-        for (i = 0; i < reallocY.length; i++) {
-            if (!reallocY[i].dirty) {
+        var newBuffer = this.image.newBuffer;
+        var oldBuffer = this.image.oldBuffer;
+        var bufferWidth = this.image.width;
+        for (i = 0; i < this.rows.length; i++) {
+            if (!this.rows[i].dirty) {
                 s = 0;
-                old_offset = reallocY[i].plus * bufferWidth;
-                while ((tmpData = movetable[s]).length > 0) {
-                    from = old_offset + tmpData.from;
-                    to = new_offset + tmpData.to;
-                    length = tmpData.length;
+                old_offset = this.rows[i].plus * bufferWidth;
+                while ((tmp = this.moveTable[s]).length > 0) {
+                    from = old_offset + tmp.from;
+                    to = new_offset + tmp.to;
+                    length = tmp.length;
                     arrayCopy(oldBuffer, from, newBuffer, to, length);
-                    s += 1;
+                    s++;
                 }
             }
             new_offset += bufferWidth;
@@ -728,58 +774,50 @@ xaos.zoom = (function() {
 
     /** Shortcut for prepare and execute move */
     ZoomContext.prototype.move = function() {
-        prepareMove(this.moveTable, this.reallocX);
-        doMove(this.moveTable, this.reallocY, this.image);
+        this.prepareMove();
+        this.doMove();
     };
 
-    /** Prepare filltable based on reallocation table
-     *
-     * @param filltable
-     * @param reallocX
-     */
-    function prepareFill(filltable, reallocX) {
-        var tmpData = null;
+    /** Prepare fill table based on relocation table */
+    ZoomContext.prototype.prepareFill = function() {
+        var tmp = null;
         var i;
         var j = 0;
         var k = 0;
         var s = 0;
         var n = 0;
-        for (i = 0; i < reallocX.length; i++) {
-            if (reallocX[i].dirty) {
+        for (i = 0; i < this.columns.length; i++) {
+            if (this.columns[i].dirty) {
                 j = i - 1;
-                for (k = i + 1; (k < reallocX.length) && reallocX[k].dirty; k++) {}
-                while ((i < reallocX.length) && reallocX[i].dirty) {
-                    if ((k < reallocX.length) && ((j < i) || ((reallocX[i].position - reallocX[j].position) > (reallocX[k].position - reallocX[i].position)))) {
+                for (k = i + 1; (k < this.columns.length) && this.columns[k].dirty; k++) {}
+                while ((i < this.columns.length) && this.columns[i].dirty) {
+                    if ((k < this.columns.length) && ((j < i) || ((this.columns[i].position - this.columns[j].position) > (this.columns[k].position - this.columns[i].position)))) {
                         j = k;
                     } else if (j < 0) {
                         break;
                     }
                     n = k - i;
-                    tmpData = filltable[s];
-                    tmpData.length = n;
-                    tmpData.from = j;
-                    tmpData.to = i;
+                    tmp = this.fillTable[s];
+                    tmp.length = n;
+                    tmp.from = j;
+                    tmp.to = i;
                     while (n > 0) {
-                        reallocX[i].position = reallocX[j].position;
-                        reallocX[i].dirty = false;
-                        n -= 1;
-                        i += 1;
+                        this.columns[i].position = this.columns[j].position;
+                        this.columns[i].dirty = false;
+                        n--;
+                        i++;
                     }
-                    s += 1;
+                    s++;
                 }
             }
         }
-        tmpData = filltable[s];
-        tmpData.length = 0;
+        tmp = this.fillTable[s];
+        tmp.length = 0;
     }
 
-    /** Apply fill table
-     *
-     * @param filltable
-     * @param reallocY
-     */
-    function doFill(filltable, reallocY, image) {
-        var tmpData = null;
+    /** Apply fill table */
+    ZoomContext.prototype.doFill = function() {
+        var tmp = null;
         var from_offset = 0;
         var to_offset = 0;
         var from = 0;
@@ -790,160 +828,69 @@ xaos.zoom = (function() {
         var t = 0;
         var s = 0;
         var d = 0;
-        var buffer = image.newBuffer;
-        var bufferWidth = image.width;
-        for (i = 0; i < reallocY.length; i++) {
-            if (reallocY[i].dirty) {
+        var buffer = this.image.newBuffer;
+        var bufferWidth = this.image.width;
+        for (i = 0; i < this.rows.length; i++) {
+            if (this.rows[i].dirty) {
                 j = i - 1;
-                for (k = i + 1; (k < reallocY.length) && reallocY[k].dirty; k++) {}
-                while ((i < reallocY.length) && reallocY[i].dirty) {
-                    if ((k < reallocY.length) && ((j < i) || ((reallocY[i].position - reallocY[j].position) > (reallocY[k].position - reallocY[i].position)))) {
+                for (k = i + 1; (k < this.rows.length) && this.rows[k].dirty; k++) {}
+                while ((i < this.rows.length) && this.rows[i].dirty) {
+                    if ((k < this.rows.length) && ((j < i) || ((this.rows[i].position - this.rows[j].position) > (this.rows[k].position - this.rows[i].position)))) {
                         j = k;
                     } else if (j < 0) {
                         break;
                     }
                     to_offset = i * bufferWidth;
                     from_offset = j * bufferWidth;
-                    if (!reallocY[j].dirty) {
+                    if (!this.rows[j].dirty) {
                         s = 0;
-                        while ((tmpData = filltable[s]).length > 0) {
-                            from = from_offset + tmpData.from;
-                            to = from_offset + tmpData.to;
-                            for (t = 0; t < tmpData.length; t++) {
+                        while ((tmp = this.fillTable[s]).length > 0) {
+                            from = from_offset + tmp.from;
+                            to = from_offset + tmp.to;
+                            for (t = 0; t < tmp.length; t++) {
                                 d = to + t;
                                 buffer[d] = buffer[from];
                             }
-                            s += 1;
+                            s++;
                         }
                     }
                     arrayCopy(buffer, from_offset, buffer, to_offset, bufferWidth);
-                    reallocY[i].position = reallocY[j].position;
-                    reallocY[i].dirty = true;
-                    i += 1;
+                    this.rows[i].position = this.rows[j].position;
+                    this.rows[i].dirty = true;
+                    i++;
                 }
             } else {
                 s = 0;
                 from_offset = i * bufferWidth;
-                while ((tmpData = filltable[s]).length > 0) {
-                    from = from_offset + tmpData.from;
-                    to = from_offset + tmpData.to;
-                    for (t = 0; t < tmpData.length; t++) {
+                while ((tmp = this.fillTable[s]).length > 0) {
+                    from = from_offset + tmp.from;
+                    to = from_offset + tmp.to;
+                    for (t = 0; t < tmp.length; t++) {
                         d = to + t;
                         buffer[d] = buffer[from];
                     }
-                    s += 1;
+                    s++;
                 }
-                reallocY[i].dirty = true;
+                this.rows[i].dirty = true;
             }
         }
     }
 
-    /** Shortcut to prepare and apply filltable */
+    /** Shortcut to prepare and apply fill table */
     ZoomContext.prototype.fill = function() {
-        prepareFill(this.fillTable, this.reallocX);
-        doFill(this.fillTable, this.reallocY, this.image);
+        this.prepareFill();
+        this.doFill();
     };
-
-    /** Calculate price of approximation
-     *
-     * @param p1
-     * @param p2
-     * @returns {number}
-     */
-    function calcPrice(p1, p2) {
-        return (p1 - p2) * (p1 - p2);
-    }
-
-    /** Add prices together to determine priority
-     *
-     * @param realloc
-     * @param r1
-     * @param r2
-     */
-    function addPrices(realloc, r1, r2) {
-        var r3;
-        while (r1 < r2) {
-            r3 = r1 + ((r2 - r1) >> 1);
-            realloc[r3].priority = (realloc[r2].position - realloc[r3].position) * realloc[r3].priority;
-            if (realloc[r3].symRef !== -1) {
-                realloc[r3].priority /= 2.0;
-            }
-            addPrices(realloc, r1, r3);
-            r1 = r3 + 1;
-        }
-    }
-
-    /** Initialize prices from reallocation table
-     *
-     * @param queue
-     * @param total
-     * @param realloc
-     * @returns {*}
-     */
-    function initPrices(queue, total, realloc) {
-        var i;
-        var j = 0;
-        for (i = 0; i < realloc.length; i++) {
-            if (realloc[i].recalculate) {
-                for (j = i; (j < realloc.length) && realloc[j].recalculate; j++) {
-                    queue[total++] = realloc[j];
-                }
-                if (j === realloc.length) {
-                    j -= 1;
-                }
-                addPrices(realloc, i, j);
-                i = j;
-            }
-        }
-        return total;
-    }
-
-    /** Standard quicksort alogrithm to sort queue according to priority
-     *
-     * @param queue
-     * @param l
-     * @param r
-     */
-    function sortQueue(queue, l, r) {
-        var m = (queue[l].priority + queue[r].priority) / 2.0;
-        var t = null;
-        var i = l;
-        var j = r;
-        do {
-            while (queue[i].priority > m) {
-                i++;
-            }
-            while (queue[j].priority < m) {
-                j--;
-            }
-            if (i <= j) {
-                t = queue[i];
-                queue[i] = queue[j];
-                queue[j] = t;
-                i++;
-                j--;
-            }
-        }
-        while (j >= i);
-        if (l < j) {
-            sortQueue(queue, l, j);
-        }
-        if (r > i) {
-            sortQueue(queue, i, r);
-        }
-    }
 
     /** Render line using solid guessing
      *
-     * @param realloc
-     * @param reallocX
-     * @param reallocY
+     * @param vector
      */
-    function renderLine(realloc, reallocX, reallocY, image) {
-        var buffer = image.newBuffer;
-        var bufferWidth = image.width;
-        var position = realloc.position;
-        var r = realloc.pos;
+    ZoomContext.prototype.renderLine = function(vector) {
+        var buffer = this.image.newBuffer;
+        var bufferWidth = this.image.width;
+        var position = vector.position;
+        var r = vector.pos;
         var offset = r * bufferWidth;
         var i;
         var j;
@@ -966,36 +913,36 @@ xaos.zoom = (function() {
         if (rend < 0) {
             rend = 0;
         }
-        for (i = r - 1; (i >= rend) && reallocY[i].dirty; i--) {}
+        for (i = r - 1; (i >= rend) && this.rows[i].dirty; i--) {}
         distu = r - i;
         rend = r + GUESS_RANGE;
-        if (rend >= reallocY.length) {
-            rend = reallocY.length - 1;
+        if (rend >= this.rows.length) {
+            rend = this.rows.length - 1;
         }
-        for (j = r + 1; (j < rend) && reallocY[j].dirty; j++) {}
+        for (j = r + 1; (j < rend) && this.rows[j].dirty; j++) {}
         distd = j - r;
-        if (!USE_SOLIDGUESS || (i < 0) || (j >= reallocY.length) || reallocY[i].dirty || reallocY[j].dirty) {
-            for (k = 0, length = reallocX.length; k < length; k++) {
-                current = reallocX[k];
-                if (!reallocX[k].dirty) {
+        if (!USE_SOLIDGUESS || (i < 0) || (j >= this.rows.length) || this.rows[i].dirty || this.rows[j].dirty) {
+            for (k = 0, length = this.columns.length; k < length; k++) {
+                current = this.columns[k];
+                if (!this.columns[k].dirty) {
                     buffer[offset] = fractal.formula(current.position, position);
                 }
-                offset += 1;
+                offset++;
             }
         } else {
             distr = 0;
             distl = Number.MAX_VALUE / 2;
             offsetu = offset - (distu * bufferWidth);
             offsetd = offset + (distd * bufferWidth);
-            for (k = 0, length = reallocX.length; k < length; k++) {
-                current = reallocX[k];
-                if (!reallocX[k].dirty) {
+            for (k = 0, length = this.columns.length; k < length; k++) {
+                current = this.columns[k];
+                if (!this.columns[k].dirty) {
                     if (distr <= 0) {
                         rend = k + GUESS_RANGE;
-                        if (rend >= reallocX.length) {
-                            rend = reallocX.length - 1;
+                        if (rend >= this.columns.length) {
+                            rend = this.columns.length - 1;
                         }
-                        for (j = k + 1; (j < rend) && reallocX[j].dirty; j++) {
+                        for (j = k + 1; (j < rend) && this.columns[j].dirty; j++) {
                             distr = j - k;
                         }
                         if (j >= rend) {
@@ -1019,28 +966,26 @@ xaos.zoom = (function() {
                     }
                     distl = 0;
                 }
-                offset += 1;
-                offsetu += 1;
-                offsetd += 1;
-                distr -= 1;
-                distl += 1;
+                offset++;
+                offsetu++;
+                offsetd++;
+                distr--;
+                distl++;
             }
         }
-        realloc.recalculate = false;
-        realloc.dirty = false;
+        vector.recalculate = false;
+        vector.dirty = false;
     }
 
     /** Render column using solid guessing
      *
-     * @param realloc
-     * @param reallocX
-     * @param reallocY
+     * @param vector
      */
-    function renderColumn(realloc, reallocX, reallocY, image) {
-        var buffer = image.newBuffer;
-        var bufferWidth = image.width;
-        var position = realloc.position;
-        var r = realloc.pos;
+    ZoomContext.prototype.renderColumn = function(vector) {
+        var buffer = this.image.newBuffer;
+        var bufferWidth = this.image.width;
+        var position = vector.position;
+        var r = vector.pos;
         var offset = r;
         var rend = r - GUESS_RANGE;
         var i;
@@ -1065,18 +1010,18 @@ xaos.zoom = (function() {
         if (rend < 0) {
             rend = 0;
         }
-        for (i = r - 1; (i >= rend) && reallocX[i].dirty; i--) {}
+        for (i = r - 1; (i >= rend) && this.columns[i].dirty; i--) {}
         distl = r - i;
         rend = r + GUESS_RANGE;
-        if (rend >= reallocX.length) {
-            rend = reallocX.length - 1;
+        if (rend >= this.columns.length) {
+            rend = this.columns.length - 1;
         }
-        for (j = r + 1; (j < rend) && reallocX[j].dirty; j++) {}
+        for (j = r + 1; (j < rend) && this.columns[j].dirty; j++) {}
         distr = j - r;
-        if (!USE_SOLIDGUESS || (i < 0) || (j >= reallocX.length) || reallocX[i].dirty || reallocX[j].dirty) {
-            for (k = 0, length = reallocY.length; k < length; k++) {
-                current = reallocY[k];
-                if (!reallocY[k].dirty) {
+        if (!USE_SOLIDGUESS || (i < 0) || (j >= this.columns.length) || this.columns[i].dirty || this.columns[j].dirty) {
+            for (k = 0, length = this.rows.length; k < length; k++) {
+                current = this.rows[k];
+                if (!this.rows[k].dirty) {
                     buffer[offset] = fractal.formula(position, current.position);
                 }
                 offset += bufferWidth;
@@ -1086,15 +1031,15 @@ xaos.zoom = (function() {
             distu = Number.MAX_VALUE / 2;
             offsetl = offset - distl;
             offsetr = offset + distr;
-            for (k = 0, length = reallocY.length; k < length; k++) {
-                current = reallocY[k];
-                if (!reallocY[k].dirty) {
+            for (k = 0, length = this.rows.length; k < length; k++) {
+                current = this.rows[k];
+                if (!this.rows[k].dirty) {
                     if (distd <= 0) {
                         rend = k + GUESS_RANGE;
-                        if (rend >= reallocY.length) {
-                            rend = reallocY.length - 1;
+                        if (rend >= this.rows.length) {
+                            rend = this.rows.length - 1;
                         }
-                        for (j = k + 1; (j < rend) && reallocY[j].dirty; j++) {
+                        for (j = k + 1; (j < rend) && this.rows[j].dirty; j++) {
                             distd = j - k;
                         }
                         if (j >= rend) {
@@ -1123,12 +1068,12 @@ xaos.zoom = (function() {
                 offset += bufferWidth;
                 offsetl += bufferWidth;
                 offsetr += bufferWidth;
-                distd -= 1;
-                distu += 1;
+                distd--;
+                distu++;
             }
         }
-        realloc.recalculate = false;
-        realloc.dirty = false;
+        vector.recalculate = false;
+        vector.dirty = false;
     }
 
     /** Calculate whether we're taking too long to render the fractal to meet the target FPS */
@@ -1138,21 +1083,21 @@ xaos.zoom = (function() {
         return 1000 / (newTime - this.startTime + this.fudgeFactor) < minFPS;
     };
 
-    /** Process the reallocation table */
+    /** Process the relocation table */
     ZoomContext.prototype.calculate = function() {
         var i, newTime, total = 0;
         this.incomplete = false;
-        total = initPrices(this.queue, total, this.reallocX);
-        total = initPrices(this.queue, total, this.reallocY);
+        total = initPrices(this.queue, total, this.columns);
+        total = initPrices(this.queue, total, this.rows);
         if (total > 0) {
             if (total > 1) {
                 sortQueue(this.queue, 0, total - 1);
             }
             for (i = 0; i < total; i++) {
                 if (this.queue[i].line) {
-                    renderLine(this.queue[i], this.reallocX, this.reallocY, this.image);
+                    this.renderLine(this.queue[i]);
                 } else {
-                    renderColumn(this.queue[i], this.reallocX, this.reallocY, this.image);
+                    this.renderColumn(this.queue[i]);
                 }
                 if (!this.recalculate && this.tooSlow() && (i < total)) {
                     this.incomplete = true;
@@ -1167,11 +1112,11 @@ xaos.zoom = (function() {
     ZoomContext.prototype.updatePosition = function() {
         var k;
         var len;
-        for (k = 0,len = this.reallocX.length; k < len; k++) {
-            this.positionX[k] = this.reallocX[k].position;
+        for (k = 0,len = this.columns.length; k < len; k++) {
+            this.columns[k].lastPosition = this.columns[k].position;
         }
-        for (k = 0,len = this.reallocY.length; k < len; k++) {
-            this.positionY[k] = this.reallocY[k].position;
+        for (k = 0,len = this.rows.length; k < len; k++) {
+            this.rows[k].lastPosition = this.rows[k].position;
         }
     };
 
@@ -1195,23 +1140,23 @@ xaos.zoom = (function() {
         this.startTime = new Date().getTime();
         this.recalculate = recalculate;
         if (recalculate || !USE_XAOS) {
-            stepx = initReallocTable(this.reallocX, this.positionX, area.begin.x, area.end.x, false);
-            stepy = initReallocTable(this.reallocY, this.positionY, area.begin.y, area.end.y, true);
+            stepx = this.initVector(this.columns, area.begin.x, area.end.x, false);
+            stepy = this.initVector(this.rows, area.begin.y, area.end.y, true);
         } else {
-            stepx = updateReallocTable(this.reallocX, this.dynamic, area.begin.x, area.end.x, this.positionX);
-            stepy = updateReallocTable(this.reallocY, this.dynamic, area.begin.y, area.end.y, this.positionY);
+            stepx = this.updateVector(this.columns, area.begin.x, area.end.x);
+            stepy = this.updateVector(this.rows, area.begin.y, area.end.y);
         }
         if (USE_SYMMETRY && typeof symy === "number" && !(area.begin.y > symy || symy > area.end.y)) {
-            prepareSymmetry(this.reallocY, Math.floor((symy - area.begin.y) / stepy), symy, stepy);
+            this.prepareSymmetry(this.rows, Math.floor((symy - area.begin.y) / stepy), symy, stepy);
         }
         if (USE_SYMMETRY && typeof symx === "number" && !(area.begin.x > symx || symx > area.end.x)) {
-            prepareSymmetry(this.reallocX, Math.floor((symx - area.begin.x) / stepx), symx, stepx);
+            this.prepareSymmetry(this.columns, Math.floor((symx - area.begin.x) / stepx), symx, stepx);
         }
         this.image.swapBuffers();
         this.move();
         this.calculate();
         if (USE_SYMMETRY && typeof symx === "number" || typeof symy === "number") {
-            doSymmetry(this.reallocX, this.reallocY, this.image);
+            this.doSymmetry();
         }
         this.image.paint();
         this.updatePosition();
@@ -1221,7 +1166,6 @@ xaos.zoom = (function() {
     /** Adjust display region to zoom based on mouse buttons */
     ZoomContext.prototype.updateRegion = function(mouse) {
         var MAXSTEP = 0.008 * 3;
-        //var STEP = 0.0006*3;
         var MUL = 0.3;
         var area = this.convertArea();
         var x = area.begin.x + mouse.x * ((area.end.x - area.begin.x) / this.image.width);
