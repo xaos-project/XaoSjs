@@ -29,192 +29,58 @@ var xaos = xaos || {};
 
 xaos.zoom = (function() {
     "use strict";
-    var USE_XAOS = true,
-        USE_SYMMETRY = false,
-        USE_SOLIDGUESS = true,
-        RANGES = 2,
-        RANGE = 4,
-        MASK = 0x7,
-        DSIZE = (RANGES + 1),
-        FPMUL = 64,
-        IRANGE = FPMUL * RANGE,
-        MAX_PRICE = Number.MAX_VALUE,
-        NEW_PRICE = IRANGE * IRANGE,
-        GUESS_RANGE = 4;
 
-    /** Utility function to pre-allocate an array of the specified size
-     * with the specified initial value. It will do the right thing
-     * to create unique items, whether you pass in a prototype, a
-     * constructor, or a primitive.
-     * @param {number} size - the size of the array.
-     * @param initial - the initial value for each entry.
-     */
-    function preAllocArray(size, initial) {
-        var i, data = [];
-        for (i = 0; i < size; i++) {
-            if (typeof initial === "object") {
-                // prototype object
-                data[i] = Object.create(initial);
-            } else if (typeof initial === "function") {
-                // constructor
-                data[i] = new initial();
-            } else {
-                // primitive
-                data[i] = initial;
-            }
-        }
-        return data;
-    }
+    const USE_XAOS = true;            // Whether to use zooming or recalculate every frame
+    const USE_SYMMETRY = true;        // Whether to use symmetry when possible
+    const USE_SOLIDGUESS = true;      // Whether to use solid guessing to avoid calculations
+    const RANGES = 2;                 // Number of ranges to use for sizing approximation data
+    const RANGE = 4;                  // Maximum distance to use for approximation
+    const MASK = 0x7;                 // Mask value for maximum potential source lines
+    const DSIZE = (RANGES + 1);       // Shift value for target lines
+    const FPMUL = 64;                 // Multiplication factor for fixed-point representation
+    const FPRANGE = FPMUL * RANGE;    // Fixed point range of approximation
+    const MAX_PRICE = Number.MAX_VALUE;   // Maximum price of uninitialized approximation
+    const NEW_PRICE = FPRANGE * FPRANGE;  // Price of calculating a new line
+    const GUESS_RANGE = 4;                // Range to use for solid guessing
 
-    /** Optimized array copy using Duff's Device.
-     *
-     * @param from {Array} source array
-     * @param fromOffset {number} offset into source array
-     * @param to {Array} target array
-     * @param toOffset {number} offset into target array
-     * @param length {number} elements to copy
-     */
-    function arrayCopy(from, fromOffset, to, toOffset, length) {
-        var n = length % 8;
-        while (n--) {
-            to[toOffset++] = from[fromOffset++];
-        }
-        n = (length / 8) | 0;
-        while (n--) {
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-            to[toOffset++] = from[fromOffset++];
-        }
-    }
-
-    /** Calculate price of approximation
-     *
-     * @param p1
-     * @param p2
-     * @returns {number}
-     */
-    function calcPrice(p1, p2) {
-        return (p1 - p2) * (p1 - p2);
-    }
-
-    /** Add prices together to determine priority
-     *
-     * @param vector
-     * @param r1
-     * @param r2
-     */
-    function addPrices(vector, r1, r2) {
-        var r3;
-        while (r1 < r2) {
-            r3 = r1 + ((r2 - r1) >> 1);
-            vector[r3].priority = (vector[r2].position - vector[r3].position) * vector[r3].priority;
-            if (vector[r3].symRef !== -1) {
-                vector[r3].priority /= 2.0;
-            }
-            addPrices(vector, r1, r3);
-            r1 = r3 + 1;
-        }
-    }
-
-    /** Initialize prices from relocation table
-     *
-     * @param queue
-     * @param total
-     * @param vector
-     * @returns {*}
-     */
-    function initPrices(queue, total, vector) {
-        var i;
-        var j = 0;
-        for (i = 0; i < vector.length; i++) {
-            if (vector[i].recalculate) {
-                for (j = i; (j < vector.length) && vector[j].recalculate; j++) {
-                    queue[total++] = vector[j];
-                }
-                if (j === vector.length) {
-                    j -= 1;
-                }
-                addPrices(vector, i, j);
-                i = j;
-            }
-        }
-        return total;
-    }
-
-    /** Standard quicksort alogrithm to sort queue according to priority
-     *
-     * @param queue
-     * @param l
-     * @param r
-     */
-    function sortQueue(queue, l, r) {
-        var m = (queue[l].priority + queue[r].priority) / 2.0;
-        var tmp = null;
-        var i = l;
-        var j = r;
-        do {
-            while (queue[i].priority > m) {
-                i++;
-            }
-            while (queue[j].priority < m) {
-                j--;
-            }
-            if (i <= j) {
-                tmp = queue[i];
-                queue[i] = queue[j];
-                queue[j] = tmp;
-                i++;
-                j--;
-            }
-        }
-        while (j >= i);
-        if (l < j) {
-            sortQueue(queue, l, j);
-        }
-        if (r > i) {
-            sortQueue(queue, i, r);
-        }
-    }
-
-    /** Creates a single entry for a move or fill table.
+    /** A price entry in the approximation table
      * @constructor
      */
-    function TableEntry() {
-        this.length = 0;
-        this.from = 0;
-        this.to = 0;
+    function Price() {
+        this.previous = null;       // Previous price calculated for the same line
+        this.index = 0;             // Index of the source for this approximation (-1 means new calculation)
+        this.price = MAX_PRICE;     // Price calculated for this line
     }
 
-    /** Creates a single entry for a this data table.
+    /** A group of pixels to be moved
      * @constructor
      */
-    function DynamicEntry() {
-        this.previous = null;
-        this.pos = 0;
-        this.price = MAX_PRICE;
+    function Move() {
+        this.length = 0;            // number of pixels to move
+        this.from = 0;              // starting offset of pixel source
+        this.to = 0;                // starting offset of pixel destination
     }
 
-    /** Creates a single entry for a relocation table.
+    /** A single row or column of pixels in the image
      * @constructor
      */
-    function Vector() {
-        this.recalculate = false;
-        this.dirty = false;
-        this.line = false;
-        this.pos = 0;
-        this.plus = 0;
-        this.symTo = 0;
-        this.symRef = 0;
-        this.lastPosition = 0.0;
-        this.position = 0.0;
-        this.priority = 0.0;
+    function Line() {
+        this.recalculate = false;   // whether to recalculate this line
+        this.dirty = false;         // whether this line needs to be redrawn
+        this.isRow = false;         // whether this is a row (true) or column (false)
+        this.index = 0;             // index of row or column within the image
+        this.symIndex = 0;          // index of pixels to use for symmetry
+        this.symTo = 0;             // position of pixels this is symmetrical to
+        this.symRef = 0;            // position of pixels referring to this one
+        this.oldPosition = 0.0;     // line's old position in the fractal's complex plane
+        this.newPosition = 0.0;     // line's new position in the fractal's complex plane
+        this.priority = 0.0;        // calculation priority for this row/column
     }
 
+    /** An image derived from an HTML5 canvas
+     * @param canvas - the canvas used to display the image
+     * @constructor
+     */
     function CanvasImage(canvas) {
         this.canvas = canvas;
         this.context = canvas.getContext("2d");
@@ -241,6 +107,30 @@ xaos.zoom = (function() {
         this.context.putImageData(this.newImageData, 0, 0);
     };
 
+    /** Utility function to make an array of the specified size
+     * with the specified initial value. It will do the right thing
+     * to create unique items, whether you pass in a prototype, a
+     * constructor, or a primitive.
+     * @param {number} size - the size of the array.
+     * @param initial - the initial value for each entry.
+     */
+    function makeArray(size, initial) {
+        var i, data = [];
+        for (i = 0; i < size; i++) {
+            if (typeof initial === "object") {
+                // prototype object
+                data[i] = Object.create(initial);
+            } else if (typeof initial === "function") {
+                // constructor
+                data[i] = new initial();
+            } else {
+                // primitive
+                data[i] = initial;
+            }
+        }
+        return data;
+    }
+
     /** Container for all zoom context data for a particular canvas.
      *
      * @param image {CanvasImage} Image on which to draw the fractal.
@@ -248,24 +138,25 @@ xaos.zoom = (function() {
      * @constructor
      */
     function ZoomContext(image, fractal) {
-        var size = Math.max(canvas.width, canvas.height);
-        this.image = image;
-        this.fractal = fractal;
-        this.columns = preAllocArray(canvas.width, Vector);
-        this.rows = preAllocArray(canvas.height, Vector);
-        this.delta = preAllocArray(size + 1, 0);
-        this.oldBest = preAllocArray(size, DynamicEntry);
-        this.newBest = preAllocArray(size, DynamicEntry);
-        this.calData = preAllocArray(size, DynamicEntry);
-        this.conData = preAllocArray(size << DSIZE, DynamicEntry);
-        this.moveTable = preAllocArray(canvas.width + 1, TableEntry);
-        this.fillTable = preAllocArray(canvas.width + 1, TableEntry);
-        this.queue = preAllocArray(canvas.width + canvas.height, null);
-        this.startTime = 0;
-        this.minFPS = 60;
-        this.fudgeFactor = 0;
-        this.incomplete = false;
-        this.zooming = false;
+        var size = Math.max(image.width, image.height);
+        this.image = image;                                 // the image to draw the fractal on
+        this.fractal = fractal;                             // the fractal formula used for the image
+        this.columns = makeArray(image.width, Line);        // columns in the fractal image
+        this.rows = makeArray(image.height, Line);          // rows in the fractal image
+        this.sourcePos = makeArray(size + 1, 0);            // fixed-point positions for source lines
+        this.oldBest = makeArray(size, null);               // best prices for previous line
+        this.newBest = makeArray(size, null);               // best prices for current line
+        this.calcPrices = makeArray(size, Price);           // prices for calculating new lines
+        this.movePrices = makeArray(size << DSIZE, Price);  // prices for approximating new lines from exsiting ones
+        this.moveTable = makeArray(image.width + 1, Move);  // table of pixels to be moved
+        this.fillTable = makeArray(image.width + 1, Move);  // table of pixels to be filled
+        this.queue = makeArray(image.width + image.height, null);   // queue of lines to calculate
+        this.queueLength = 0;                               // length of the calculation queue
+        this.startTime = 0;                                 // time that the current frame was started
+        this.minFPS = 60;                                   // target FPS to maintain
+        this.fudgeFactor = 0;                               // fudge factor used to achieve target FPS
+        this.incomplete = false;                            // flag indicates incomplete calculation
+        this.zooming = false;                               // flag indicates image is currently zooming
     }
 
     /** Swaps the old and new best prices in the this container. */
@@ -293,237 +184,276 @@ xaos.zoom = (function() {
         };
     };
 
-    /** Resets relocation table for fresh calculation
+    /** Resets line of pixels for fresh calculation
      *
-     * @param vector - relocation table
-     * @param position - array of coordinates for line or column in the complex plane
-     * @param begin - starting cooridnate
+     * @param line - row or column of pixels
+     * @param begin - starting fractal cooridnate
      * @param end - ending coordinate
-     * @param line - whether this is a line or column
+     * @param isRow - whether this is a row or column
      * @returns {number}
      */
-    ZoomContext.prototype.initVector = function(vector, begin, end, line) {
-        var i, p, step = (end - begin) / vector.length;
-        for (i = 0, p = begin; i < vector.length; i++, p += step) {
-            vector[i].recalculate = true;
-            vector[i].dirty = true;
-            vector[i].line = line;
-            vector[i].pos = i;
-            vector[i].lastPosition = p;
-            vector[i].position = p;
-            vector[i].plus = i;
-            vector[i].symTo = -1;
-            vector[i].symRef = -1;
+    ZoomContext.prototype.initialize = function(lines, begin, end, isRow) {
+        var i; 
+        var p;
+        var step = (end - begin) / lines.length;
+        var line = null;
+
+        for (i = 0, p = begin; i < lines.length; i++, p += step) {
+            line = lines[i]
+            line.recalculate = true;
+            line.dirty = true;
+            line.isRow = isRow;
+            line.index = i;
+            line.oldPosition = p;
+            line.newPosition = p;
+            line.symIndex = i;
+            line.symTo = -1;
+            line.symRef = -1;
         }
         return step;
     }
 
-    /** Calculate the best approximation for points based on previous frame
+    /** Calculate price of approximating one line from another
      *
-     * @param vector - relocation table for rows or columns
-     * @param begin - beginning coordinate (x or y)
-     * @param end - ending coordinate (x or y)
-     * @param position - array of position coordinates on the complex plane
-     * @returns {number}
+     * @param p1 - position of first line
+     * @param p2 - position of second line
+     * @returns {number} - price of approximation
      */
-    ZoomContext.prototype.updateVector = function(vector, begin, end) {
-        var previous = null;
-        var best = null;
-        var price = 0;
-        var i;
-        var y = 0;
-        var p = 0;
-        var ps = 0;
-        var pe = 0;
-        var ps1 = 0;
-        var yend = 0;
-        var flag = 0;
-        var size = vector.length;
-        var step = (end - begin) / size;
-        var tofix = (size * FPMUL) / (end - begin);
-        var delta = this.delta;
+    function calcPrice(p1, p2) {
+        return (p1 - p2) * (p1 - p2);
+    }
 
-        delta[size] = Number.MAX_VALUE;
-        for (i = size - 1; i >= 0; i--) {
-            delta[i] = ((vector[i].lastPosition - begin) * tofix) | 0;
-            if (delta[i] > delta[i + 1]) {
-                delta[i] = delta[i + 1];
+    /** Calculate fixed-point representation of each line's old position
+     * @param lines - lines to use for calculation
+     * @param begin - beginning of floating point range
+     * @param end - end of floating point range
+     */
+    ZoomContext.prototype.calcFixedpoint = function(lines, begin, end) {
+        var tofix = (lines.length * FPMUL) / (end - begin);
+        var i;
+        this.sourcePos[lines.length] = Number.MAX_VALUE;
+        for (i = lines.length - 1; i >= 0; i--) {
+            this.sourcePos[i] = ((lines[i].oldPosition - begin) * tofix) | 0;
+            if (this.sourcePos[i] > this.sourcePos[i + 1]) {
+                this.sourcePos[i] = this.sourcePos[i + 1];
             }
         }
+    }
 
-        for (i = 0; i < size; i++) {
+    /** Choose the best approximation for lines based on previous frame
+     *
+     * @param lines - relocation table for rows or columns
+     * @param begin - beginning coordinate (x or y)
+     * @param end - ending coordinate (x or y)
+     * @param newPosition - array of newPosition coordinates on the complex plane
+     * @returns {number}
+     */
+    ZoomContext.prototype.approximate = function(lines, begin, end) {
+        var previous = null;    // pointer to previous approximation
+        var best = null;        // pointer to best approximation
+        var line = null;        // pointer to current line
+        var price = 0;          // price of current approximation
+        var dest;               // index of the current destination line
+        var idealPos = 0;       // ideal position for the current destination
+        var maxPos = 0;         // maximum valid source position of the current destination
+        var source = 0;         // index of current source line
+        var firstSource = 0;    // index of first potential source for current destination
+        var lastSource = 0;     // index of last potential source for current destination
+        var nextSource = 0;     // index of first potential source for next destination
+        var flag = 0;
+        var size = lines.length;
+        var step = (end - begin) / size;
+        var sourcePos = this.sourcePos;
+
+        // Calculate fixed-point positions of all source lines
+        this.calcFixedpoint(lines, begin, end);
+
+        for (let dest = 0, idealPos = 0; dest < size; dest++, idealPos += FPMUL) {
             this.swapBest();
-            yend = y - IRANGE;
-            if (yend < 0) {
-                yend = 0;
+            maxPos = idealPos - FPRANGE;
+            if (maxPos < 0) {
+                maxPos = 0;
             }
-            p = ps;
-            while (delta[p] < yend) {
-                p++;
+            source = firstSource;
+            while (sourcePos[source] < maxPos) {
+                source++;
             }
-            ps1 = p;
-            yend = y + IRANGE;
+            nextSource = source;
+            maxPos = idealPos + FPRANGE;
 
-            if ((ps !== pe) && (p > ps)) {
-                if (p < pe) {
-                    previous = this.oldBest[p - 1];
+            // Find the previous approximation
+            if ((firstSource !== lastSource) && (source > firstSource)) {
+                // Previous line had approximations; use them
+                if (source < lastSource) {
+                    previous = this.oldBest[source - 1];
                 } else {
-                    previous = this.oldBest[pe - 1];
+                    previous = this.oldBest[lastSource - 1];
                 }
                 price = previous.price;
-            } else if (i > 0) {
-                previous = this.calData[i - 1];
+            } else if (dest > 0) {
+                // Previous line had no approximations
+                // Use the price of calculating the previous line
+                previous = this.calcPrices[dest - 1];
                 price = previous.price;
             } else {
+                // We're on the first line; no previous prices exists
                 previous = null;
                 price = 0;
             }
 
+            // Add the price for calculating this line
             price += NEW_PRICE;
-            best = this.calData[i];
+            best = this.calcPrices[dest];
             best.price = price;
-            best.pos = -1;
+            best.index = -1;
             best.previous = previous;
 
-            if (ps !== pe) {
-                if (p === ps) {
-                    if (delta[p] !== delta[p + 1]) {
-                        previous = this.calData[i - 1];
-                        price = previous.price + calcPrice(delta[p], y);
+            // Try all possible approximations for this line and calculate the best one
+            if (firstSource !== lastSource) {
+                if (source === firstSource) {
+                    // We're on the first line so there is no previous line
+                    if (sourcePos[source] !== sourcePos[source + 1]) {
+                        previous = this.calcPrices[dest - 1];
+                        price = previous.price + calcPrice(sourcePos[source], idealPos);
                         if (price < best.price) {
-                            best = this.conData[(p << DSIZE) + (i & MASK)];
+                            best = this.movePrices[(source << DSIZE) + (dest & MASK)];
                             best.price = price;
-                            best.pos = p;
+                            best.index = source;
                             best.previous = previous;
                         }
                     }
-                    this.newBest[p++] = best;
+                    this.newBest[source++] = best;
                 }
                 previous = null;
-                while (p < pe) {
-                    if (delta[p] !== delta[p + 1]) {
-                        previous = this.oldBest[p - 1];
+
+                // Potential sources for the previous and current line overlap within
+                // this range, so we have to calculate every possibility and find the best 
+                while (source < lastSource) {
+                    if (sourcePos[source] !== sourcePos[source + 1]) {
+                        previous = this.oldBest[source - 1];
                         price = previous.price + NEW_PRICE;
                         if (price < best.price) {
-                            best = this.conData[((p - 1) << DSIZE) + (i & MASK)];
+                            best = this.movePrices[((source - 1) << DSIZE) + (dest & MASK)];
                             best.price = price;
-                            best.pos = -1;
+                            best.index = -1;
                             best.previous = previous;
-                            this.newBest[p - 1] = best;
+                            this.newBest[source - 1] = best;
                         }
-                        price = previous.price + calcPrice(delta[p], y);
+                        price = previous.price + calcPrice(sourcePos[source], idealPos);
                         if (price < best.price) {
-                            best = this.conData[(p << DSIZE) + (i & MASK)];
+                            best = this.movePrices[(source << DSIZE) + (dest & MASK)];
                             best.price = price;
-                            best.pos = p;
+                            best.index = source;
                             best.previous = previous;
-                        } else if (delta[p] > y) {
-                            this.newBest[p++] = best;
+                        } else if (sourcePos[source] > idealPos) {
+                            this.newBest[source++] = best;
                             break;
                         }
                     }
-                    this.newBest[p++] = best;
+                    this.newBest[source++] = best;
                 }
-                if (p > ps) {
-                    previous = this.oldBest[p - 1];
+
+                // We are past the overlapping area
+                if (source > firstSource) {
+                    previous = this.oldBest[source - 1];
                 } else {
-                    previous = this.calData[i - 1];
+                    previous = this.calcPrices[dest - 1];
                 }
                 price = previous.price + NEW_PRICE;
-                if ((price < best.price) && (p > ps1)) {
-                    best = this.conData[((p - 1) << DSIZE) + (i & MASK)];
+                if ((price < best.price) && (source > nextSource)) {
+                    best = this.movePrices[((source - 1) << DSIZE) + (dest & MASK)];
                     best.price = price;
-                    best.pos = -1;
+                    best.index = -1;
                     best.previous = previous;
-                    this.newBest[p - 1] = best;
+                    this.newBest[source - 1] = best;
                 }
-                while (delta[p] < yend) {
-                    if (delta[p] !== delta[p + 1]) {
-                        price = previous.price + calcPrice(delta[p], y);
+                while (sourcePos[source] < maxPos) {
+                    if (sourcePos[source] !== sourcePos[source + 1]) {
+                        price = previous.price + calcPrice(sourcePos[source], idealPos);
                         if (price < best.price) {
-                            best = this.conData[(p << DSIZE) + (i & MASK)];
+                            best = this.movePrices[(source << DSIZE) + (dest & MASK)];
                             best.price = price;
-                            best.pos = p;
+                            best.index = source;
                             best.previous = previous;
-                        } else if (delta[p] > y) {
+                        } else if (sourcePos[source] > idealPos) {
                             break;
                         }
                     }
-                    this.newBest[p++] = best;
+                    this.newBest[source++] = best;
                 }
-                while (delta[p] < yend) {
-                    this.newBest[p++] = best;
+                while (sourcePos[source] < maxPos) {
+                    this.newBest[source++] = best;
                 }
-            } else if (delta[p] < yend) {
-                if (i > 0) {
-                    previous = this.calData[i - 1];
+            } else if (sourcePos[source] < maxPos) {
+                if (dest > 0) {
+                    previous = this.calcPrices[dest - 1];
                     price = previous.price;
                 } else {
                     previous = null;
                     price = 0;
                 }
-                while (delta[p] < yend) {
-                    if (delta[p] !== delta[p + 1]) {
-                        price += calcPrice(delta[p], y);
+                while (sourcePos[source] < maxPos) {
+                    if (sourcePos[source] !== sourcePos[source + 1]) {
+                        price += calcPrice(sourcePos[source], idealPos);
                         if (price < best.price) {
-                            best = this.conData[(p << DSIZE) + (i & MASK)];
+                            best = this.movePrices[(source << DSIZE) + (dest & MASK)];
                             best.price = price;
-                            best.pos = p;
+                            best.index = source;
                             best.previous = previous;
-                        } else if (delta[p] > y) {
+                        } else if (sourcePos[source] > idealPos) {
                             break;
                         }
                     }
-                    this.newBest[p++] = best;
+                    this.newBest[source++] = best;
                 }
-                while (delta[p] < yend) {
-                    this.newBest[p++] = best;
+                while (sourcePos[source] < maxPos) {
+                    this.newBest[source++] = best;
                 }
 
             }
-            ps = ps1;
-            ps1 = pe;
-            pe = p;
-            y += FPMUL;
+            firstSource = nextSource;
+            nextSource = lastSource;
+            lastSource = source;
         }
-        if ((begin > delta[0]) && (end < delta[size - 1])) {
+        if ((begin > sourcePos[0]) && (end < sourcePos[size - 1])) {
             flag = 1;
         }
-        if ((delta[0] > 0) && (delta[size - 1] < (size * FPMUL))) {
+        if ((sourcePos[0] > 0) && (sourcePos[size - 1] < (size * FPMUL))) {
             flag = 2;
         }
-        for (i = size - 1; i >= 0; i--) {
-            vector[i].symTo = -1;
-            vector[i].symRef = -1;
-            if (best.pos < 0) {
-                vector[i].recalculate = true;
-                vector[i].dirty = true;
-                vector[i].plus = vector[i].pos;
+        for (dest = size - 1; dest >= 0; dest--) {
+            line = lines[dest]
+            line.symTo = -1;
+            line.symRef = -1;
+            if (best.index < 0) {
+                line.recalculate = true;
+                line.dirty = true;
+                line.symIndex = line.index;
             } else {
-                vector[i].plus = best.pos;
-                vector[i].position = vector[best.pos].lastPosition;
-                vector[i].recalculate = false;
-                vector[i].dirty = false;
+                line.symIndex = best.index;
+                line.newPosition = lines[best.index].oldPosition;
+                line.recalculate = false;
+                line.dirty = false;
             }
             best = best.previous;
         }
-        newPositions(vector, begin, end, step, flag);
+        newPositions(lines, begin, end, step, flag);
         return step;
     }
 
-    /** Calculate new positions based on relocation table
+    /** Choose new positions for lines based on calculated prices
      *
-     * @param vector
+     * @param lines
      * @param size
      * @param begin1
      * @param end1
      * @param step
-     * @param position
+     * @param newPosition
      * @param flag
      */
-    function newPositions(vector, begin1, end1, step, flag) {
+    function newPositions(lines, begin1, end1, step, flag) {
         var delta = 0;
-        var size = vector.length;
+        var size = lines.length;
         var begin = 0;
         var end = 0;
         var s = -1;
@@ -533,22 +463,22 @@ xaos.zoom = (function() {
         }
         while (s < (size - 1)) {
             e = s + 1;
-            if (vector[e].recalculate) {
+            if (lines[e].recalculate) {
                 while (e < size) {
-                    if (!vector[e].recalculate) {
+                    if (!lines[e].recalculate) {
                         break;
                     }
                     e++;
                 }
                 if (e < size) {
-                    end = vector[e].position;
+                    end = lines[e].newPosition;
                 } else {
                     end = end1;
                 }
                 if (s < 0) {
                     begin = begin1;
                 } else {
-                    begin = vector[s].position;
+                    begin = lines[s].newPosition;
                 }
                 if ((e === size) && (begin > end)) {
                     end = begin;
@@ -562,22 +492,22 @@ xaos.zoom = (function() {
                     case 1:
                         for (s++; s < e; s++) {
                             begin += delta;
-                            vector[s].position = begin;
-                            vector[s].priority = 1 / (1 + (Math.abs((vector[s].lastPosition - begin)) * step));
+                            lines[s].newPosition = begin;
+                            lines[s].priority = 1 / (1 + (Math.abs((lines[s].oldPosition - begin)) * step));
                         }
                         break;
                     case 2:
                         for (s++; s < e; s++) {
                             begin += delta;
-                            vector[s].position = begin;
-                            vector[s].priority = Math.abs((vector[s].lastPosition - begin)) * step;
+                            lines[s].newPosition = begin;
+                            lines[s].priority = Math.abs((lines[s].oldPosition - begin)) * step;
                         }
                         break;
                     default:
                         for (s++; s < e; s++) {
                             begin += delta;
-                            vector[s].position = begin;
-                            vector[s].priority = 1.0;
+                            lines[s].newPosition = begin;
+                            lines[s].priority = 1.0;
                         }
                         break;
                 }
@@ -588,23 +518,24 @@ xaos.zoom = (function() {
 
     /** Populate symmetry data into relocation table
      *
-     * @param vector
+     * @param lines
      * @param symi
      * @param symPosition
      * @param step
      */
-    ZoomContext.prototype.prepareSymmetry = function(vector, symi, symPosition, step) {
+    function prepareSymmetry(lines, symi, symPosition, step) {
         var i;
         var j = 0;
         var tmp;
         var abs;
         var distance;
-        var position;
-        var size = vector.length;
+        var newPosition;
+        var size = lines.length;
         var max = size - RANGE - 1;
         var min = RANGE;
         var istart = 0;
-        var symRealloc = null;
+        var line = null;
+        var otherLine = null;
         var symj = (2 * symi) - size;
         symPosition *= 2;
         if (symj < 0) {
@@ -612,76 +543,103 @@ xaos.zoom = (function() {
         }
         distance = step * RANGE;
         for (i = symj; i < symi; i++) {
-            if (vector[i].symTo !== -1) {
+            line = lines[i];
+            if (line.symTo !== -1) {
                 continue;
             }
-            position = vector[i].position;
-            vector[i].symTo = (2 * symi) - i;
-            if (vector[i].symTo > max) {
-                vector[i].symTo = max;
+            newPosition = line.newPosition;
+            line.symTo = (2 * symi) - i;
+            if (line.symTo > max) {
+                line.symTo = max;
             }
-            j = ((vector[i].symTo - istart) > RANGE) ? (-RANGE) : (-vector[i].symTo + istart);
-            if (vector[i].recalculate) {
-                while ((j < RANGE) && ((vector[i].symTo + j) < (size - 1))) {
-                    tmp = symPosition - vector[vector[i].symTo + j].position;
-                    abs = Math.abs(tmp - position);
+            j = ((line.symTo - istart) > RANGE) ? (-RANGE) : (-line.symTo + istart);
+            if (line.recalculate) {
+                while ((j < RANGE) && ((line.symTo + j) < (size - 1))) {
+                    tmp = symPosition - lines[line.symTo + j].newPosition;
+                    abs = Math.abs(tmp - newPosition);
                     if (abs < distance) {
-                        if (((i === 0) || (tmp > vector[i - 1].position)) && (tmp < vector[i + 1].position)) {
+                        if (((i === 0) || (tmp > lines[i - 1].newPosition)) && (tmp < lines[i + 1].newPosition)) {
                             distance = abs;
                             min = j;
                         }
-                    } else if (tmp < position) {
+                    } else if (tmp < newPosition) {
                         break;
                     }
                     j++;
                 }
             } else {
-                while ((j < RANGE) && ((vector[i].symTo + j) < (size - 1))) {
-                    if (vector[i].recalculate) {
-                        tmp = symPosition - vector[vector[i].symTo + j].position;
-                        abs = Math.abs(tmp - position);
+                while ((j < RANGE) && ((line.symTo + j) < (size - 1))) {
+                    if (line.recalculate) {
+                        tmp = symPosition - lines[line.symTo + j].newPosition;
+                        abs = Math.abs(tmp - newPosition);
                         if (abs < distance) {
-                            if (((i === 0) || (tmp > vector[i - 1].position)) && (tmp < vector[i + 1].position)) {
+                            if (((i === 0) || (tmp > lines[i - 1].newPosition)) && (tmp < lines[i + 1].newPosition)) {
                                 distance = abs;
                                 min = j;
                             }
-                        } else if (tmp < position) {
+                        } else if (tmp < newPosition) {
                             break;
                         }
                     }
                     j++;
                 }
             }
-            vector[i].symTo += min;
-            symRealloc = vector[vector[i].symTo];
-            if ((min === RANGE) || (vector[i].symTo <= symi) || (symRealloc.symTo !== -1) || (symRealloc.symRef !== -1)) {
-                vector[i].symTo = -1;
+            line.symTo += min;
+            otherLine = lines[line.symTo];
+            if ((min === RANGE) || (line.symTo <= symi) || (otherLine.symTo !== -1) || (otherLine.symRef !== -1)) {
+                line.symTo = -1;
                 continue;
             }
-            if (!vector[i].recalculate) {
-                vector[i].symTo = -1;
-                if ((symRealloc.symTo !== -1) || !symRealloc.recalculate) {
+            if (!line.recalculate) {
+                line.symTo = -1;
+                if ((otherLine.symTo !== -1) || !otherLine.recalculate) {
                     continue;
                 }
-                symRealloc.plus = vector[i].plus;
-                symRealloc.symTo = i;
-                istart = vector[i].symTo - 1;
-                symRealloc.recalculate = false;
-                symRealloc.dirty = true;
-                vector[i].symRef = vector[i].symTo;
-                symRealloc.position = symPosition - vector[i].position;
+                otherLine.symIndex = line.symIndex;
+                otherLine.symTo = i;
+                istart = line.symTo - 1;
+                otherLine.recalculate = false;
+                otherLine.dirty = true;
+                line.symRef = line.symTo;
+                otherLine.newPosition = symPosition - line.newPosition;
             } else {
-                if (symRealloc.symTo !== -1) {
-                    vector[i].symTo = -1;
+                if (otherLine.symTo !== -1) {
+                    line.symTo = -1;
                     continue;
                 }
-                vector[i].plus = symRealloc.plus;
-                istart = vector[i].symTo - 1;
-                vector[i].recalculate = false;
-                vector[i].dirty = true;
-                symRealloc.symRef = i;
-                vector[i].position = symPosition - symRealloc.position;
+                line.symIndex = otherLine.symIndex;
+                istart = line.symTo - 1;
+                line.recalculate = false;
+                line.dirty = true;
+                otherLine.symRef = i;
+                line.newPosition = symPosition - otherLine.newPosition;
             }
+        }
+    }
+
+    /** Optimized array copy using Duff's Device.
+     *
+     * @param from {Array} source array
+     * @param fromOffset {number} offset into source array
+     * @param to {Array} idealPos array
+     * @param toOffset {number} offset into idealPos array
+     * @param length {number} elements to copy
+     */
+    function arrayCopy(from, fromOffset, to, toOffset, length) {
+        var n = length % 8;
+        while (n--) {
+            to[toOffset++] = from[fromOffset++];
+        }
+        n = (length / 8) | 0;
+        while (n--) {
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
+            to[toOffset++] = from[fromOffset++];
         }
     }
 
@@ -717,21 +675,21 @@ xaos.zoom = (function() {
 
     /** Build an optimized move table based on relocation table */
     ZoomContext.prototype.prepareMove = function() {
-        var tmp = null;
+        var move = null;
         var i = 0;
         var j = 0;
         var s = 0;
         while (i < this.columns.length) {
             if (!this.columns[i].dirty) {
-                tmp = this.moveTable[s];
-                tmp.to = i;
-                tmp.length = 1;
-                tmp.from = this.columns[i].plus;
+                move = this.moveTable[s];
+                move.to = i;
+                move.length = 1;
+                move.from = this.columns[i].symIndex;
                 for (j = i + 1; j < this.columns.length; j++) {
-                    if (this.columns[j].dirty || ((j - this.columns[j].plus) !== (tmp.to - tmp.from))) {
+                    if (this.columns[j].dirty || ((j - this.columns[j].symIndex) !== (move.to - move.from))) {
                         break;
                     }
-                    tmp.length++;
+                    move.length++;
                 }
                 i = j;
                 s++;
@@ -739,15 +697,15 @@ xaos.zoom = (function() {
                 i++;
             }
         }
-        tmp = this.moveTable[s];
-        tmp.length = 0;
+        move = this.moveTable[s];
+        move.length = 0;
     }
 
     /** Execute moves defined in move table */
     ZoomContext.prototype.doMove = function() {
-        var tmp = null;
-        var new_offset = 0;
-        var old_offset = 0;
+        var move = null;
+        var newOffset = 0;
+        var oldOffset = 0;
         var from = 0;
         var to = 0;
         var i;
@@ -759,28 +717,28 @@ xaos.zoom = (function() {
         for (i = 0; i < this.rows.length; i++) {
             if (!this.rows[i].dirty) {
                 s = 0;
-                old_offset = this.rows[i].plus * bufferWidth;
-                while ((tmp = this.moveTable[s]).length > 0) {
-                    from = old_offset + tmp.from;
-                    to = new_offset + tmp.to;
-                    length = tmp.length;
+                oldOffset = this.rows[i].symIndex * bufferWidth;
+                while ((move = this.moveTable[s]).length > 0) {
+                    from = oldOffset + move.from;
+                    to = newOffset + move.to;
+                    length = move.length;
                     arrayCopy(oldBuffer, from, newBuffer, to, length);
                     s++;
                 }
             }
-            new_offset += bufferWidth;
+            newOffset += bufferWidth;
         }
     }
 
     /** Shortcut for prepare and execute move */
-    ZoomContext.prototype.move = function() {
+    ZoomContext.prototype.movePixels = function() {
         this.prepareMove();
         this.doMove();
-    };
+    }
 
     /** Prepare fill table based on relocation table */
     ZoomContext.prototype.prepareFill = function() {
-        var tmp = null;
+        var fill = null;
         var i;
         var j = 0;
         var k = 0;
@@ -791,18 +749,18 @@ xaos.zoom = (function() {
                 j = i - 1;
                 for (k = i + 1; (k < this.columns.length) && this.columns[k].dirty; k++) {}
                 while ((i < this.columns.length) && this.columns[i].dirty) {
-                    if ((k < this.columns.length) && ((j < i) || ((this.columns[i].position - this.columns[j].position) > (this.columns[k].position - this.columns[i].position)))) {
+                    if ((k < this.columns.length) && ((j < i) || ((this.columns[i].newPosition - this.columns[j].newPosition) > (this.columns[k].newPosition - this.columns[i].newPosition)))) {
                         j = k;
                     } else if (j < 0) {
                         break;
                     }
                     n = k - i;
-                    tmp = this.fillTable[s];
-                    tmp.length = n;
-                    tmp.from = j;
-                    tmp.to = i;
+                    fill = this.fillTable[s];
+                    fill.length = n;
+                    fill.from = j;
+                    fill.to = i;
                     while (n > 0) {
-                        this.columns[i].position = this.columns[j].position;
+                        this.columns[i].newPosition = this.columns[j].newPosition;
                         this.columns[i].dirty = false;
                         n--;
                         i++;
@@ -811,13 +769,13 @@ xaos.zoom = (function() {
                 }
             }
         }
-        tmp = this.fillTable[s];
-        tmp.length = 0;
+        fill = this.fillTable[s];
+        fill.length = 0;
     }
 
     /** Apply fill table */
     ZoomContext.prototype.doFill = function() {
-        var tmp = null;
+        var fill = null;
         var from_offset = 0;
         var to_offset = 0;
         var from = 0;
@@ -835,7 +793,7 @@ xaos.zoom = (function() {
                 j = i - 1;
                 for (k = i + 1; (k < this.rows.length) && this.rows[k].dirty; k++) {}
                 while ((i < this.rows.length) && this.rows[i].dirty) {
-                    if ((k < this.rows.length) && ((j < i) || ((this.rows[i].position - this.rows[j].position) > (this.rows[k].position - this.rows[i].position)))) {
+                    if ((k < this.rows.length) && ((j < i) || ((this.rows[i].newPosition - this.rows[j].newPosition) > (this.rows[k].newPosition - this.rows[i].newPosition)))) {
                         j = k;
                     } else if (j < 0) {
                         break;
@@ -844,10 +802,10 @@ xaos.zoom = (function() {
                     from_offset = j * bufferWidth;
                     if (!this.rows[j].dirty) {
                         s = 0;
-                        while ((tmp = this.fillTable[s]).length > 0) {
-                            from = from_offset + tmp.from;
-                            to = from_offset + tmp.to;
-                            for (t = 0; t < tmp.length; t++) {
+                        while ((fill = this.fillTable[s]).length > 0) {
+                            from = from_offset + fill.from;
+                            to = from_offset + fill.to;
+                            for (t = 0; t < fill.length; t++) {
                                 d = to + t;
                                 buffer[d] = buffer[from];
                             }
@@ -855,17 +813,17 @@ xaos.zoom = (function() {
                         }
                     }
                     arrayCopy(buffer, from_offset, buffer, to_offset, bufferWidth);
-                    this.rows[i].position = this.rows[j].position;
+                    this.rows[i].newPosition = this.rows[j].newPosition;
                     this.rows[i].dirty = true;
                     i++;
                 }
             } else {
                 s = 0;
                 from_offset = i * bufferWidth;
-                while ((tmp = this.fillTable[s]).length > 0) {
-                    from = from_offset + tmp.from;
-                    to = from_offset + tmp.to;
-                    for (t = 0; t < tmp.length; t++) {
+                while ((fill = this.fillTable[s]).length > 0) {
+                    from = from_offset + fill.from;
+                    to = from_offset + fill.to;
+                    for (t = 0; t < fill.length; t++) {
                         d = to + t;
                         buffer[d] = buffer[from];
                     }
@@ -880,17 +838,17 @@ xaos.zoom = (function() {
     ZoomContext.prototype.fill = function() {
         this.prepareFill();
         this.doFill();
-    };
+    }
 
     /** Render line using solid guessing
      *
-     * @param vector
+     * @param row
      */
-    ZoomContext.prototype.renderLine = function(vector) {
+    ZoomContext.prototype.renderRow = function(row) {
         var buffer = this.image.newBuffer;
         var bufferWidth = this.image.width;
-        var position = vector.position;
-        var r = vector.pos;
+        var newPosition = row.newPosition;
+        var r = row.index;
         var offset = r * bufferWidth;
         var i;
         var j;
@@ -925,7 +883,7 @@ xaos.zoom = (function() {
             for (k = 0, length = this.columns.length; k < length; k++) {
                 current = this.columns[k];
                 if (!this.columns[k].dirty) {
-                    buffer[offset] = fractal.formula(current.position, position);
+                    buffer[offset] = this.fractal.formula(current.newPosition, newPosition);
                 }
                 offset++;
             }
@@ -959,10 +917,10 @@ xaos.zoom = (function() {
                         if ((n == buffer[offsetu]) && (n == buffer[offsetd]) && (n == buffer[offsetul]) && (n == buffer[offsetur]) && (n == buffer[offsetdl]) && (n == buffer[offsetdr])) {
                             buffer[offset] = n;
                         } else {
-                            buffer[offset] = fractal.formula(current.position, position);
+                            buffer[offset] = this.fractal.formula(current.newPosition, newPosition);
                         }
                     } else {
-                        buffer[offset] = fractal.formula(current.position, position);
+                        buffer[offset] = this.fractal.formula(current.newPosition, newPosition);
                     }
                     distl = 0;
                 }
@@ -973,19 +931,19 @@ xaos.zoom = (function() {
                 distl++;
             }
         }
-        vector.recalculate = false;
-        vector.dirty = false;
+        row.recalculate = false;
+        row.dirty = false;
     }
 
     /** Render column using solid guessing
      *
-     * @param vector
+     * @param column
      */
-    ZoomContext.prototype.renderColumn = function(vector) {
+    ZoomContext.prototype.renderColumn = function(column) {
         var buffer = this.image.newBuffer;
         var bufferWidth = this.image.width;
-        var position = vector.position;
-        var r = vector.pos;
+        var newPosition = column.newPosition;
+        var r = column.index;
         var offset = r;
         var rend = r - GUESS_RANGE;
         var i;
@@ -1022,7 +980,7 @@ xaos.zoom = (function() {
             for (k = 0, length = this.rows.length; k < length; k++) {
                 current = this.rows[k];
                 if (!this.rows[k].dirty) {
-                    buffer[offset] = fractal.formula(position, current.position);
+                    buffer[offset] = this.fractal.formula(newPosition, current.newPosition);
                 }
                 offset += bufferWidth;
             }
@@ -1058,10 +1016,10 @@ xaos.zoom = (function() {
                         if ((n == buffer[offsetl]) && (n == buffer[offsetr]) && (n == buffer[offsetlu]) && (n == buffer[offsetru]) && (n == buffer[offsetld]) && (n == buffer[offsetrd])) {
                             buffer[offset] = n;
                         } else {
-                            buffer[offset] = fractal.formula(position, current.position);
+                            buffer[offset] = this.fractal.formula(newPosition, current.newPosition);
                         }
                     } else {
-                        buffer[offset] = fractal.formula(position, current.position);
+                        buffer[offset] = this.fractal.formula(newPosition, current.newPosition);
                     }
                     distu = 0;
                 }
@@ -1072,34 +1030,110 @@ xaos.zoom = (function() {
                 distu++;
             }
         }
-        vector.recalculate = false;
-        vector.dirty = false;
+        column.recalculate = false;
+        column.dirty = false;
     }
 
-    /** Calculate whether we're taking too long to render the fractal to meet the target FPS */
+    /** Calculate whether we're taking too long to render the fractal to meet the idealPos FPS */
     ZoomContext.prototype.tooSlow = function() {
         var newTime = new Date().getTime(),
             minFPS = this.zooming ? this.minFPS : 10;
         return 1000 / (newTime - this.startTime + this.fudgeFactor) < minFPS;
-    };
+    }
+
+    /** Prioritize calculation of lines between begin and end
+     *
+     * @param lines - rows or columns to prioritize
+     * @param begin - index of first line to prioritize
+     * @param end - index of last line to prioritize
+     */
+    function calcPriority(lines, begin, end) {
+        var middle;
+        while (begin < end) {
+            middle = begin + ((end - begin) >> 1);
+            lines[middle].priority = (lines[end].newPosition - lines[middle].newPosition) * lines[middle].priority;
+            if (lines[middle].symRef !== -1) {
+                lines[middle].priority /= 2.0;
+            }
+            calcPriority(lines, begin, middle);
+            begin = middle + 1;
+        }
+    }
+
+    /** Enqueue all the lines to be recalculated and set their priority
+     *
+     * @param lines - lines to enqueue for calculation
+     */
+    ZoomContext.prototype.enqueueCalculations = function(lines) {
+        var i;
+        var j = 0;
+        for (i = 0; i < lines.length; i++) {
+            if (lines[i].recalculate) {
+                for (j = i; (j < lines.length) && lines[j].recalculate; j++) {
+                    this.queue[this.queueLength++] = lines[j];
+                }
+                if (j === lines.length) {
+                    j -= 1;
+                }
+                calcPriority(lines, i, j);
+                i = j;
+            }
+        }
+    }
+
+    /** Sort calculation queue according to priority (using quicksort)
+     *
+     * @param queue
+     * @param l
+     * @param r
+     */
+    function sortQueue(queue, l, r) {
+        var m = (queue[l].priority + queue[r].priority) / 2.0;
+        var tmp = null;
+        var i = l;
+        var j = r;
+        do {
+            while (queue[i].priority > m) {
+                i++;
+            }
+            while (queue[j].priority < m) {
+                j--;
+            }
+            if (i <= j) {
+                tmp = queue[i];
+                queue[i] = queue[j];
+                queue[j] = tmp;
+                i++;
+                j--;
+            }
+        }
+        while (j >= i);
+        if (l < j) {
+            sortQueue(queue, l, j);
+        }
+        if (r > i) {
+            sortQueue(queue, i, r);
+        }
+    }
 
     /** Process the relocation table */
     ZoomContext.prototype.calculate = function() {
-        var i, newTime, total = 0;
+        var i, newTime;
         this.incomplete = false;
-        total = initPrices(this.queue, total, this.columns);
-        total = initPrices(this.queue, total, this.rows);
-        if (total > 0) {
-            if (total > 1) {
-                sortQueue(this.queue, 0, total - 1);
+        this.queueLength = 0;
+        this.enqueueCalculations(this.columns);
+        this.enqueueCalculations(this.rows);
+        if (this.queueLength > 0) {
+            if (this.queueLength > 1) {
+                sortQueue(this.queue, 0, this.queueLength - 1);
             }
-            for (i = 0; i < total; i++) {
-                if (this.queue[i].line) {
-                    this.renderLine(this.queue[i]);
+            for (i = 0; i < this.queueLength; i++) {
+                if (this.queue[i].isRow) {
+                    this.renderRow(this.queue[i]);
                 } else {
                     this.renderColumn(this.queue[i]);
                 }
-                if (!this.recalculate && this.tooSlow() && (i < total)) {
+                if (!this.recalculate && this.tooSlow() && (i < this.queueLength)) {
                     this.incomplete = true;
                     this.fill();
                     break;
@@ -1108,15 +1142,15 @@ xaos.zoom = (function() {
         }
     };
 
-    /** Update position array with newly calculated positions */
+    /** Update newPosition array with newly calculated positions */
     ZoomContext.prototype.updatePosition = function() {
         var k;
         var len;
         for (k = 0,len = this.columns.length; k < len; k++) {
-            this.columns[k].lastPosition = this.columns[k].position;
+            this.columns[k].oldPosition = this.columns[k].newPosition;
         }
         for (k = 0,len = this.rows.length; k < len; k++) {
-            this.rows[k].lastPosition = this.rows[k].position;
+            this.rows[k].oldPosition = this.rows[k].newPosition;
         }
     };
 
@@ -1133,27 +1167,27 @@ xaos.zoom = (function() {
 
     /** Overall fractal drawing workflow, calls other functions */
     ZoomContext.prototype.drawFractal = function(recalculate) {
-        var area = this.convertArea(),
-            symx = this.fractal.symmetry && this.fractal.symmetry.x,
-            symy = this.fractal.symmetry && this.fractal.symmetry.y,
-            stepx, stepy;
+        var area = this.convertArea();
+        var symx = this.fractal.symmetry && this.fractal.symmetry.x;
+        var symy = this.fractal.symmetry && this.fractal.symmetry.y;
+        var stepx, stepy;
         this.startTime = new Date().getTime();
         this.recalculate = recalculate;
         if (recalculate || !USE_XAOS) {
-            stepx = this.initVector(this.columns, area.begin.x, area.end.x, false);
-            stepy = this.initVector(this.rows, area.begin.y, area.end.y, true);
+            stepx = this.initialize(this.columns, area.begin.x, area.end.x, false);
+            stepy = this.initialize(this.rows, area.begin.y, area.end.y, true);
         } else {
-            stepx = this.updateVector(this.columns, area.begin.x, area.end.x);
-            stepy = this.updateVector(this.rows, area.begin.y, area.end.y);
+            stepx = this.approximate(this.columns, area.begin.x, area.end.x);
+            stepy = this.approximate(this.rows, area.begin.y, area.end.y);
         }
         if (USE_SYMMETRY && typeof symy === "number" && !(area.begin.y > symy || symy > area.end.y)) {
-            this.prepareSymmetry(this.rows, Math.floor((symy - area.begin.y) / stepy), symy, stepy);
+            prepareSymmetry(this.rows, Math.floor((symy - area.begin.y) / stepy), symy, stepy);
         }
         if (USE_SYMMETRY && typeof symx === "number" && !(area.begin.x > symx || symx > area.end.x)) {
-            this.prepareSymmetry(this.columns, Math.floor((symx - area.begin.x) / stepx), symx, stepx);
+            prepareSymmetry(this.columns, Math.floor((symx - area.begin.x) / stepx), symx, stepx);
         }
         this.image.swapBuffers();
-        this.move();
+        this.movePixels();
         this.calculate();
         if (USE_SYMMETRY && typeof symx === "number" || typeof symy === "number") {
             this.doSymmetry();
@@ -1243,51 +1277,49 @@ xaos.zoom = (function() {
     }
 }());
 
-xaos.makePalette = function() {
-    var MAXENTRIES = 65536,
-        segmentsize,
-        setsegments,
-        nsegments,
-        i, y,
-        r, g, b,
-        rs, gs, bs,
-        palette = [],
-        segments = [
-            [0, 0, 0],
-            [120, 119, 238],
-            [24, 7, 25],
-            [197, 66, 28],
-            [29, 18, 11],
-            [135, 46, 71],
-            [24, 27, 13],
-            [241, 230, 128],
-            [17, 31, 24],
-            [240, 162, 139],
-            [11, 4, 30],
-            [106, 87, 189],
-            [29, 21, 14],
-            [12, 140, 118],
-            [10, 6, 29],
-            [50, 144, 77],
-            [22, 0, 24],
-            [148, 188, 243],
-            [4, 32, 7],
-            [231, 146, 14],
-            [10, 13, 20],
-            [184, 147, 68],
-            [13, 28, 3],
-            [169, 248, 152],
-            [4, 0, 34],
-            [62, 83, 48],
-            [7, 21, 22],
-            [152, 97, 184],
-            [8, 3, 12],
-            [247, 92, 235],
-            [31, 32, 16]
-        ];
-    segmentsize = 8;
-    nsegments = Math.floor(255 / segmentsize);
-    setsegments = Math.floor((MAXENTRIES + 3) / segmentsize);
+/** Create the default XaoS color palette */
+xaos.defaultPalette = function() {
+    var MAXENTRIES = 65536;
+    var segmentsize = 8;
+    var setsegments = Math.floor((MAXENTRIES + 3) / segmentsize);
+    var nsegments = Math.floor(255 / segmentsize);
+    var segments = [
+        [0, 0, 0],
+        [120, 119, 238],
+        [24, 7, 25],
+        [197, 66, 28],
+        [29, 18, 11],
+        [135, 46, 71],
+        [24, 27, 13],
+        [241, 230, 128],
+        [17, 31, 24],
+        [240, 162, 139],
+        [11, 4, 30],
+        [106, 87, 189],
+        [29, 21, 14],
+        [12, 140, 118],
+        [10, 6, 29],
+        [50, 144, 77],
+        [22, 0, 24],
+        [148, 188, 243],
+        [4, 32, 7],
+        [231, 146, 14],
+        [10, 13, 20],
+        [184, 147, 68],
+        [13, 28, 3],
+        [169, 248, 152],
+        [4, 0, 34],
+        [62, 83, 48],
+        [7, 21, 22],
+        [152, 97, 184],
+        [8, 3, 12],
+        [247, 92, 235],
+        [31, 32, 16]
+    ];
+    var i, y;
+    var r, g, b;
+    var rs, gs, bs;
+    var palette = [];
 
     for (i = 0; i < setsegments; i++) {
         r = segments[i % nsegments][0];
@@ -1306,7 +1338,7 @@ xaos.makePalette = function() {
     return new Uint32Array(palette);
 };
 
-var fractal = {
+xaos.mandelbrot = {
     symmetry: {x: null, y: 0 },
     region: {
         center: { x: -0.75, y: 0.0 },
@@ -1337,7 +1369,7 @@ var fractal = {
 
         return this.palette[0];
     },
-    palette: xaos.makePalette()
+    palette: xaos.defaultPalette()
 };
 
-xaos.zoom(document.getElementById("canvas"), fractal);
+xaos.zoom(document.getElementById("canvas"), xaos.mandelbrot);
