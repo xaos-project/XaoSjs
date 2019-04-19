@@ -257,9 +257,9 @@ xaos.zoom = (function() {
         var idealPos = 0;       // ideal position for the current destination
         var maxPos = 0;         // maximum valid source position of the current destination
         var source = 0;         // index of current source line
-        var firstSource = 0;    // index of first potential source for current destination
-        var lastSource = 0;     // index of last potential source for current destination
-        var nextSource = 0;     // index of first potential source for next destination
+        var prevBegin = 0;      // index of first potential source for current destination
+        var prevEnd = 0;        // index of last potential source for current destination
+        var currBegin = 0;      // index of first potential source for next destination
         var flag = 0;
         var size = lines.length;
         var step = (end - begin) / size;
@@ -268,26 +268,26 @@ xaos.zoom = (function() {
         // Calculate fixed-point positions of all source lines
         this.calcFixedpoint(lines, begin, end);
 
-        for (let dest = 0, idealPos = 0; dest < size; dest++, idealPos += FPMUL) {
+        for (dest = 0, idealPos = 0; dest < size; dest++, idealPos += FPMUL) {
             this.swapBest();
             maxPos = idealPos - FPRANGE;
-            if (maxPos < 0) {
-                maxPos = 0;
+            if (maxPos < -FPMUL) {
+                maxPos = -FPMUL;
             }
-            source = firstSource;
+            source = prevBegin;
             while (sourcePos[source] < maxPos) {
                 source++;
             }
-            nextSource = source;
+            currBegin = source;
             maxPos = idealPos + FPRANGE;
 
             // Find the previous approximation
-            if ((firstSource !== lastSource) && (source > firstSource)) {
+            if ((prevBegin !== prevEnd) && (source > prevBegin)) {
                 // Previous line had approximations; use them
-                if (source < lastSource) {
+                if (source < prevEnd) {
                     previous = this.oldBest[source - 1];
                 } else {
-                    previous = this.oldBest[lastSource - 1];
+                    previous = this.oldBest[prevEnd - 1];
                 }
                 price = previous.price;
             } else if (dest > 0) {
@@ -309,8 +309,8 @@ xaos.zoom = (function() {
             best.previous = previous;
 
             // Try all possible approximations for this line and calculate the best one
-            if (firstSource !== lastSource) {
-                if (source === firstSource) {
+            if (prevBegin !== prevEnd) {
+                if (source === prevBegin) {
                     // We're on the first line so there is no previous line
                     if (sourcePos[source] !== sourcePos[source + 1]) {
                         previous = this.calcPrices[dest - 1];
@@ -328,7 +328,7 @@ xaos.zoom = (function() {
 
                 // Potential sources for the previous and current line overlap within
                 // this range, so we have to calculate every possibility and find the best 
-                while (source < lastSource) {
+                while (source < prevEnd) {
                     if (sourcePos[source] !== sourcePos[source + 1]) {
                         previous = this.oldBest[source - 1];
                         price = previous.price + NEW_PRICE;
@@ -354,13 +354,13 @@ xaos.zoom = (function() {
                 }
 
                 // We are past the overlapping area
-                if (source > firstSource) {
+                if (source > prevBegin) {
                     previous = this.oldBest[source - 1];
                 } else {
                     previous = this.calcPrices[dest - 1];
                 }
                 price = previous.price + NEW_PRICE;
-                if ((price < best.price) && (source > nextSource)) {
+                if ((price < best.price) && (source > currBegin)) {
                     best = this.movePrices[((source - 1) << DSIZE) + (dest & MASK)];
                     best.price = price;
                     best.index = -1;
@@ -411,11 +411,11 @@ xaos.zoom = (function() {
                 }
 
             }
-            firstSource = nextSource;
-            nextSource = lastSource;
-            lastSource = source;
+            prevBegin = currBegin;
+            currBegin = prevEnd;
+            prevEnd = source;
         }
-        if ((begin > sourcePos[0]) && (end < sourcePos[size - 1])) {
+        if ((begin > lines[0].oldPosition) && (end < lines[size - 1].oldPosition)) {
             flag = 1;
         }
         if ((sourcePos[0] > 0) && (sourcePos[size - 1] < (size * FPMUL))) {
