@@ -4,7 +4,7 @@
 
 # About
 
-XaoS.js is a real-time fractal zoomer.  Instead of drawing a box and waiting for the fractal
+XaoS.js is a real-time fractal zoomer in a Web Browser.  Instead of drawing a box and waiting for the fractal
 to re-draw, it allows you to dive into the fractal in realtime.
 
 It a JavaScript adaptation of the
