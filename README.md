@@ -7,7 +7,7 @@
 XaoS.js is a real-time fractal zoomer in a Web Browser.  Instead of drawing a box and waiting for the fractal
 to re-draw, it allows you to dive into the fractal in realtime.
 
-It a JavaScript adaptation of the
+This is a JavaScript adaptation of the
 [Hubicka algorithm](https://github.com/xaos-project/XaoS/blob/master/doc/xaosdev.info#L1755)
 from [XaoS](http://xaos.sf.net). The zooming code was adapted from Java by way of
 [NextFractal](http://nextfractal.nextbreakpoint.com/) (previously JAME).
