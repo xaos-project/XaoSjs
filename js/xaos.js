@@ -82,6 +82,14 @@ xaos.zoom = (function() {
      * @constructor
      */
     function CanvasImage(canvas) {
+
+        if (canvas.width !== innerWidth || canvas.height !== innerHeight) {
+            canvas.width = innerWidth;
+            canvas.height = innerHeight;
+        } else {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
         this.canvas = canvas;
         this.context = canvas.getContext("2d");
         this.width = canvas.width;
