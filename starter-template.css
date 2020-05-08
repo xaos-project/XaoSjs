@@ -5,3 +5,18 @@ body {
     padding: 40px 15px;
     text-align: center;
 }
+#fullScreenButton {
+    position: absolute;
+    top:1em;
+    right:3em
+}
+#fullScreenToggleButton {
+    position: absolute;
+    top:1em;
+    right:1em;
+}
+#resetButton {
+    position: absolute;
+    top:1em;
+    left:1em;
+}
