@@ -1255,7 +1255,34 @@ xaos.zoom = (function() {
             }
         }
 
-        canvas.onmousedown = function(e) {
+        canvas.ontouchstart = function(e) {
+            if(e.touches.length < 3){
+                var touch = e.touches[0];
+                (e.touches.length == 2)?mouse.button[2]=true:mouse.button[2]=false;
+                var mouseEvent = new MouseEvent("mousedown", {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY
+                });
+                canvas.dispatchEvent(mouseEvent);
+            }
+        };
+
+        canvas.ontouchend = function(e) {
+            console.log(e);
+            var mouseEvent = new MouseEvent("mouseup", {});
+            canvas.dispatchEvent(mouseEvent);
+        };
+
+        canvas.ontouchmove = function(e) {
+            var touch = e.touches[0];
+            var mouseEvent = new MouseEvent("mousemove", {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            canvas.dispatchEvent(mouseEvent);
+        };
+
+        canvas.onmousedown =  function(e) {
             mouse.button[e.button] = true;
             mouse.x = e.offsetX || (e.clientX - canvas.offsetLeft);
             mouse.y = e.offsetY || (e.clientY - canvas.offsetTop);
