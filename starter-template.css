@@ -5,12 +5,12 @@ body {
     padding: 40px 15px;
     text-align: center;
 }
-#fullScreenButton {
+#browseButton {
     position: absolute;
     top:1em;
-    right:3em
+    right:10em
 }
-#fullScreenToggleButton {
+#captureMenuButton {
     position: absolute;
     top:1em;
     right:1em;
@@ -19,4 +19,15 @@ body {
     position: absolute;
     top:1em;
     left:1em;
+}
+#saveCanvasButton {
+    position: absolute;
+    top:1em;
+    left:1em;
+    visibility: collapse;
+}
+#instructions {
+    position: absolute;
+    bottom:1em;
+    left: 1em;
 }

@@ -70,11 +70,16 @@
             </canvas>
         </div>
         <a href="index.html" id ="resetButton" class = "btn btn-danger">Reset</a>
-        <button id ="fullScreenButton" class = "btn btn-success" onclick="fullScreenCanvas();">Open XaoS in Full Screen Mode</button>
-        <input type="button" id = "fullScreenToggleButton" class = "btn btn-warning" value = "X" onclick="fullScreenMessageToggle();">
-        <p>This is a real-time fractal zoomer.  Using it is simple: left-click to zoom in, right-click to zoom out.</p>
-        <p>Touch Devices: Use one finger to zoom in, two fingers to zoom out. Interrupt zoom out with one finger.</p>
-        <p>Please use fullscreen mode to experience full functionality</p>
+        <input type="button" id = "browseButton" class = "btn btn-success" value = "Browse Mode" onclick="browseMenu()">
+        <input type="button" id = "captureMenuButton" class = "btn btn-info" value = "Capture Mode" onclick="captureMenu()">
+        <a href="#" id = "saveCanvasButton" class = "btn btn-success" download="image.png" onclick="saveCanvas()">Capture</a>
+        <div id = "instructions">
+            <p style="font-weight: bold;">Instructions</p>
+            <p>Click on "Browse Mode" to perform zoom</p>
+            <p>Click on "Capture Mode" to export canvas as image</p>
+            <p>Mouse Users: Left-click to zoom in, right-click to zoom out</p>
+            <p>Touch Device Users: Use one finger to zoom in, two fingers to zoom out. Interrupt zoom with one finger.</p>
+        </div>
     </div>
     <div class="modal fade" id="about" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
         <div class="modal-dialog" role="document">
