@@ -1,13 +1,13 @@
 # Try It
 
-[Try](http://jblang.github.io/XaoSjs) the live demo!
+[Try the live demo!](http://xaos-project.github.io/XaoSjs/) Using XaoSjs is simple. Left click to zoom in; right click to zoom out.  Works best in Chrome, acceptably in Firefox, and I make no guarantees about anything else.
 
 # About
 
-XaoS.js is a real-time fractal zoomer.  Instead of drawing a box and waiting for the fractal
+XaoS.js is a real-time fractal zoomer in a Web Browser.  Instead of drawing a box and waiting for the fractal
 to re-draw, it allows you to dive into the fractal in realtime.
 
-It a JavaScript adaptation of the
+This is a JavaScript adaptation of the
 [Hubicka algorithm](https://github.com/xaos-project/XaoS/blob/master/doc/xaosdev.info#L1755)
 from [XaoS](http://xaos.sf.net). The zooming code was adapted from Java by way of
 [NextFractal](http://nextfractal.nextbreakpoint.com/) (previously JAME).

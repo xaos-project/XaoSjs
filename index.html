@@ -21,10 +21,21 @@
 			margin-top: 75px;
 		}
 
-		.container-canvas {
+        .container-overlay {
 			margin: 0 auto;
-			width: 1024px;
-		}
+            position: relative;
+            max-width: 100em;
+            max-height: 75em;
+        }
+
+		#containerCanvas {
+            filter: blur(5px);
+        }
+
+        #canvas {
+            max-width: 100%;
+            max-height: 100%;
+        }
     </style>
 </head>
 
@@ -43,7 +54,6 @@
 		</div>
 		<div id="navbar" class="collapse navbar-collapse">
 			<ul class="nav navbar-nav">
-				<li class="active"><a href="index.html">Reset</a></li>
 				<li><a href="#" data-toggle="modal" data-target="#about">About</a></li>
 				<li><a href="http://github.com/jblang/XaoSjs">GitHub</a></li>
 			</ul>
@@ -52,12 +62,22 @@
 </nav>
 
 <div class="container">
-    <div class="container-canvas">
-        <canvas id="canvas" width="1024" height="768">
-            <p>Your browser doesn't seem to support the &lt;canvas&gt; tag.
-                Try <a href="http://www.google.com/chrome">Chrome</a> or <a href="http://firefox.com">Firefox</a>.</p>
-        </canvas>
-        <p>This is a real-time fractal zoomer.  Using it is simple: left-click to zoom in, right-click to zoom out.</p>
+    <canvas id="canvas">
+        <p>Your browser doesn't seem to support the &lt;canvas&gt; tag.
+            Try <a href="http://www.google.com/chrome">Chrome</a> or <a href="http://firefox.com">Firefox</a>.</p>
+    </canvas>
+    <div id="controls">
+      <button id ="fullScreenButton" class = "btn btn-primary" onclick="goFullScreen();"></button>
+      <a href="index.html" id ="resetButton" class = "btn btn-danger">Reset</a>
+      <a href="#" id = "saveCanvasButton" class = "btn btn-primary" download="image.png" onclick="saveCanvas()">Capture</a><br/>
+    </div>
+    <div id = "instructions">
+        <u style="font-weight: bold;">Instructions</u><br/>
+        <strong>Click on "Browse Mode" to perform zoom</strong><br/>
+        <strong>Click on "Capture Mode" to export canvas as image</strong><br/>
+        <strong>Mouse Users: Left-click to zoom in, right-click to zoom out</strong><br/>
+        <strong>Touch Device Users: Use one finger to zoom in, two fingers to zoom out. Interrupt zoom with one finger.</strong>
+    </div>
     </div>
     <div class="modal fade" id="about" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
         <div class="modal-dialog" role="document">
@@ -102,5 +122,6 @@
 <!-- IE10 viewport hack for Surface/desktop Windows 8 bug -->
 <script src="js/ie10-viewport-bug-workaround.js"></script>
 <script src="js/xaos.js"></script>
+<script src="js/starter-template.js"></script>
 </body>
 </html>
