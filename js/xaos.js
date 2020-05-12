@@ -82,12 +82,13 @@ xaos.zoom = (function() {
      * @constructor
      */
     function CanvasImage(canvas) {
-
-        if (canvas.width !== innerWidth || canvas.height !== innerHeight) {
-            canvas.width = innerWidth;
-            canvas.height = innerHeight;
+        let width = canvas.clientWidth;
+        let height = canvas.clientHeight;
+        if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
         } else {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.clearRect(0, 0, width, height);
         }
 
         this.canvas = canvas;
@@ -1268,7 +1269,6 @@ xaos.zoom = (function() {
         };
 
         canvas.ontouchend = function(e) {
-            console.log(e);
             var mouseEvent = new MouseEvent("mouseup", {});
             canvas.dispatchEvent(mouseEvent);
         };

@@ -14,29 +14,8 @@
 	<link href="css/bootstrap.min.css" rel="stylesheet">
 
 	<!-- Custom styles for this template -->
-	<link href="starter-template.css" rel="stylesheet">
+    <link href="starter-template.css" rel="stylesheet">
 
-	<style>
-		.container-main {
-			margin-top: 75px;
-		}
-
-        .container-overlay {
-			margin: 0 auto;
-            position: relative;
-            max-width: 100em;
-            max-height: 75em;
-        }
-
-		#containerCanvas {
-            filter: blur(5px);
-        }
-
-        #canvas {
-            max-width: 100%;
-            max-height: 100%;
-        }
-    </style>
 </head>
 
 <body>
@@ -61,20 +40,23 @@
 	</div>
 </nav>
 
-<div class="container-fluid">
-    <div class="container-overlay">
-        <div id="containerCanvas">
-            <canvas id="canvas">
-                <p>Your browser doesn't seem to support the &lt;canvas&gt; tag.
-                    Try <a href="http://www.google.com/chrome">Chrome</a> or <a href="http://firefox.com">Firefox</a>.</p>
-            </canvas>
-        </div>
-        <a href="index.html" id ="resetButton" class = "btn btn-danger">Reset</a>
-        <button id ="fullScreenButton" class = "btn btn-success" onclick="fullScreenCanvas();">Open XaoS in Full Screen Mode</button>
-        <input type="button" id = "fullScreenToggleButton" class = "btn btn-warning" value = "X" onclick="fullScreenMessageToggle();">
-        <p>This is a real-time fractal zoomer.  Using it is simple: left-click to zoom in, right-click to zoom out.</p>
-        <p>Touch Devices: Use one finger to zoom in, two fingers to zoom out. Interrupt zoom out with one finger.</p>
-        <p>Please use fullscreen mode to experience full functionality</p>
+<div class="container">
+    <canvas id="canvas">
+        <p>Your browser doesn't seem to support the &lt;canvas&gt; tag.
+            Try <a href="http://www.google.com/chrome">Chrome</a> or <a href="http://firefox.com">Firefox</a>.</p>
+    </canvas>
+    <div id="controls">
+      <button id ="fullScreenButton" class = "btn btn-primary" onclick="goFullScreen();"></button>
+      <a href="index.html" id ="resetButton" class = "btn btn-danger">Reset</a>
+      <a href="#" id = "saveCanvasButton" class = "btn btn-primary" download="image.png" onclick="saveCanvas()">Capture</a><br/>
+    </div>
+    <div id = "instructions">
+        <u style="font-weight: bold;">Instructions</u><br/>
+        <strong>Click on "Browse Mode" to perform zoom</strong><br/>
+        <strong>Click on "Capture Mode" to export canvas as image</strong><br/>
+        <strong>Mouse Users: Left-click to zoom in, right-click to zoom out</strong><br/>
+        <strong>Touch Device Users: Use one finger to zoom in, two fingers to zoom out. Interrupt zoom with one finger.</strong>
+    </div>
     </div>
     <div class="modal fade" id="about" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
         <div class="modal-dialog" role="document">
