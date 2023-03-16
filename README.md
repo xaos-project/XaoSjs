@@ -10,7 +10,7 @@ to re-draw, it allows you to dive into the fractal in realtime.
 This is a JavaScript adaptation of the
 [Hubicka algorithm](https://github.com/xaos-project/XaoS/blob/master/doc/xaosdev.info#L1755)
 from [XaoS](http://xaos.sf.net). The zooming code was adapted from Java by way of
-[NextFractal](http://nextfractal.nextbreakpoint.com/) (previously JAME).
+[NextFractal](https://nextbreakpoint.com/nextfractal.html) (previously JAME).
 
 # License
 
